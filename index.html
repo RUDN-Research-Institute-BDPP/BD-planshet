@@ -1,0 +1,997 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1, user-scalable=no">
+<meta name="theme-color" content="#0f2230">
+<title>Тренажёры — учёт прохождений</title>
+<link rel="manifest" href="manifest.webmanifest">
+<style>
+  :root{
+    --ink:#0f2230;        /* глубокий сине-графитовый */
+    --ink-soft:#3b4d5a;
+    --muted:#6c7c87;
+    --line:#dfe5e9;
+    --surface:#eef1f3;    /* холодный светлый фон */
+    --card:#ffffff;
+    --accent:#1f7a8c;     /* клинический бирюзово-синий */
+    --accent-d:#155e6d;
+    --accent-bg:#e6f1f3;
+    --go:#2f8f5b;         /* старт */
+    --stop:#b8463c;       /* стоп */
+    --warn:#9a6b14;
+    --radius:14px;
+    --shadow:0 1px 2px rgba(15,34,48,.06), 0 6px 20px rgba(15,34,48,.06);
+    --mono:"SFMono-Regular",ui-monospace,"Roboto Mono","DejaVu Sans Mono",Menlo,Consolas,monospace;
+    --sans:system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%}
+  body{
+    font-family:var(--sans); color:var(--ink); background:var(--surface);
+    -webkit-tap-highlight-color:transparent; touch-action:manipulation;
+    overscroll-behavior:none;
+  }
+  .app{max-width:980px;margin:0 auto;min-height:100%;display:flex;flex-direction:column}
+  header.top{
+    position:sticky;top:0;z-index:20;background:var(--ink);color:#fff;
+    padding:env(safe-area-inset-top) 16px 0;display:flex;align-items:center;gap:12px;
+  }
+  header.top .bar{display:flex;align-items:center;gap:12px;width:100%;height:58px}
+  header.top h1{font-size:16px;font-weight:650;margin:0;letter-spacing:.2px;flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  header.top .back{
+    appearance:none;border:0;background:rgba(255,255,255,.12);color:#fff;
+    width:38px;height:38px;border-radius:10px;font-size:20px;cursor:pointer;flex:0 0 auto;
+  }
+  header.top .ghost{
+    appearance:none;border:1px solid rgba(255,255,255,.25);background:transparent;color:#fff;
+    height:38px;padding:0 12px;border-radius:10px;font-size:13px;cursor:pointer;font-weight:600;
+  }
+  main{flex:1;padding:16px;padding-bottom:40px}
+  .muted{color:var(--muted)}
+  .small{font-size:13px}
+  h2{font-size:20px;margin:4px 0 14px}
+  h3{font-size:15px;margin:22px 0 10px;color:var(--ink-soft);text-transform:uppercase;letter-spacing:.6px;font-weight:700}
+
+  .card{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);box-shadow:var(--shadow)}
+  .pad{padding:16px}
+  .row{display:flex;gap:10px;align-items:center}
+  .wrap{flex-wrap:wrap}
+  .between{justify-content:space-between}
+  .grow{flex:1}
+
+  button,.btn{
+    appearance:none;font-family:inherit;font-size:15px;font-weight:650;cursor:pointer;
+    border-radius:12px;border:1px solid var(--line);background:var(--card);color:var(--ink);
+    padding:12px 16px;min-height:48px;transition:filter .12s, transform .04s;
+  }
+  button:active,.btn:active{transform:translateY(1px)}
+  button:focus-visible,.btn:focus-visible,input:focus-visible{outline:3px solid #9fd0d9;outline-offset:2px}
+  .btn-accent{background:var(--accent);border-color:var(--accent);color:#fff}
+  .btn-accent:hover{filter:brightness(1.04)}
+  .btn-ghost{background:transparent}
+  .btn-danger{background:var(--stop);border-color:var(--stop);color:#fff}
+  .btn-go{background:var(--go);border-color:var(--go);color:#fff}
+  .btn-block{width:100%;justify-content:center;display:flex}
+  .btn-lg{min-height:64px;font-size:18px}
+  .btn-xl{min-height:96px;font-size:24px;border-radius:18px}
+  button[disabled]{opacity:.45;cursor:not-allowed}
+
+  input[type=text],input[type=number],input[type=date],textarea,select{
+    font-family:inherit;font-size:16px;color:var(--ink);background:#fff;
+    border:1px solid var(--line);border-radius:12px;padding:12px 14px;width:100%;
+  }
+  label.field{display:block;margin:0 0 12px}
+  label.field > span{display:block;font-size:13px;font-weight:600;color:var(--ink-soft);margin-bottom:6px}
+
+  .list{display:flex;flex-direction:column;gap:10px}
+  .item{display:flex;align-items:center;gap:12px;padding:14px 16px;background:var(--card);border:1px solid var(--line);border-radius:var(--radius);box-shadow:var(--shadow);cursor:pointer}
+  .item:hover{border-color:#c7d2d8}
+  .item .name{font-weight:650;font-size:16px}
+  .item .meta{font-size:13px;color:var(--muted)}
+  .chev{margin-left:auto;color:var(--muted);font-size:20px}
+
+  .tiles{display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px}
+  @media(max-width:680px){.tiles{grid-template-columns:1fr}}
+  .tile{display:flex;flex-direction:column;gap:6px;text-align:left;align-items:flex-start;padding:18px;min-height:120px}
+  .tile .ti{font-size:24px}
+  .tile .tt{font-weight:700;font-size:17px}
+  .tile .td{font-size:13px;color:var(--muted);font-weight:500}
+  .badge{display:inline-flex;align-items:center;gap:6px;background:var(--accent-bg);color:var(--accent-d);border-radius:999px;padding:3px 10px;font-size:12px;font-weight:700}
+
+  /* «приборный» секундомер — фирменный элемент */
+  .stopwatch{
+    font-family:var(--mono);font-variant-numeric:tabular-nums;font-weight:600;
+    letter-spacing:1px;color:var(--ink);text-align:center;
+    font-size:72px;line-height:1;padding:8px 0 6px;
+  }
+  .stopwatch .cs{color:var(--muted);font-size:.6em}
+  .stage{display:flex;flex-direction:column;gap:16px;min-height:60vh}
+  .recdot{display:inline-block;width:11px;height:11px;border-radius:50%;background:var(--stop);box-shadow:0 0 0 0 rgba(184,70,60,.5);animation:pulse 1.3s infinite}
+  @keyframes pulse{0%{box-shadow:0 0 0 0 rgba(184,70,60,.5)}70%{box-shadow:0 0 0 10px rgba(184,70,60,0)}100%{box-shadow:0 0 0 0 rgba(184,70,60,0)}}
+
+  table.data{width:100%;border-collapse:collapse;font-size:14px}
+  table.data th,table.data td{text-align:left;padding:8px 10px;border-bottom:1px solid var(--line)}
+  table.data th{color:var(--muted);font-weight:700;font-size:12px;text-transform:uppercase;letter-spacing:.4px}
+  table.data td.num{font-family:var(--mono);font-variant-numeric:tabular-nums}
+
+  .toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%) translateY(20px);
+    background:var(--ink);color:#fff;padding:12px 18px;border-radius:12px;font-size:14px;font-weight:600;
+    opacity:0;pointer-events:none;transition:.2s;z-index:50;box-shadow:0 10px 30px rgba(0,0,0,.25);max-width:90%}
+  .toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+
+  canvas.draw{width:100%;touch-action:none;background:#fff;border:1px solid var(--line);border-radius:var(--radius);display:block;cursor:crosshair}
+  .toolbar{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+  .switch{display:inline-flex;align-items:center;gap:8px;font-size:14px;font-weight:600;color:var(--ink-soft);cursor:pointer;user-select:none}
+  .switch input{width:auto}
+  .empty{padding:36px 16px;text-align:center;color:var(--muted)}
+  .seg{display:flex;border:1px solid var(--line);border-radius:12px;overflow:hidden}
+  .seg button{border:0;border-radius:0;border-right:1px solid var(--line);background:#fff;min-height:44px;font-size:14px;flex:1}
+  .seg button:last-child{border-right:0}
+  .seg button.on{background:var(--accent);color:#fff}
+  .hint{font-size:13px;color:var(--muted);background:var(--accent-bg);border-radius:10px;padding:10px 12px}
+  .kbd{font-family:var(--mono);background:#eef1f3;border:1px solid var(--line);border-radius:6px;padding:1px 6px;font-size:12px}
+</style>
+</head>
+<body>
+<div class="app">
+  <header class="top">
+    <div class="bar">
+      <button class="back" id="backBtn" title="Назад" hidden>‹</button>
+      <h1 id="title">Тренажёры</h1>
+      <button class="ghost" id="exportAllBtn">Экспорт всех ⤓</button>
+    </div>
+  </header>
+  <main id="view"></main>
+</div>
+<div class="toast" id="toast"></div>
+
+<script>
+"use strict";
+/* =========================================================================
+   ТРЕНАЖЁРЫ — учёт прохождений. Чистый ванильный JS, без зависимостей.
+   Хранилище: IndexedDB. Экспорт: CSV (с BOM) + ZIP (store, своя реализация).
+   ========================================================================= */
+
+/* ----------------------------- утилиты ---------------------------------- */
+const $ = (sel, root=document) => root.querySelector(sel);
+const view = $('#view');
+const titleEl = $('#title');
+const backBtn = $('#backBtn');
+
+function toast(msg, ms=2200){
+  const t = $('#toast'); t.textContent = msg; t.classList.add('show');
+  clearTimeout(toast._t); toast._t = setTimeout(()=>t.classList.remove('show'), ms);
+}
+function pad(n,l=2){ return String(n).padStart(l,'0'); }
+function fmtClock(ms){ // mm:ss.d
+  const d = Math.floor(ms/100)%10;
+  const s = Math.floor(ms/1000)%60;
+  const m = Math.floor(ms/60000);
+  return {m:pad(m), s:pad(s), d:String(d)};
+}
+function fmtSec(ms){ return (ms/1000).toFixed(2); }
+function fmtDate(ts){
+  const d = new Date(ts);
+  return d.getFullYear()+'-'+pad(d.getMonth()+1)+'-'+pad(d.getDate())+' '+pad(d.getHours())+':'+pad(d.getMinutes());
+}
+function safeName(s){ return (s||'').toString().trim().replace(/[^\wА-Яа-яЁё .\-]+/g,'_').replace(/\s+/g,'_').slice(0,60) || 'noname'; }
+function audioExt(type){ type=type||''; if(type.includes('webm'))return 'webm'; if(type.includes('ogg'))return 'ogg'; if(type.includes('mp4')||type.includes('m4a')||type.includes('aac'))return 'm4a'; if(type.includes('wav'))return 'wav'; return 'bin'; }
+
+/* ----------------------------- CSV -------------------------------------- */
+function csvCell(v){
+  if(v===null||v===undefined) v='';
+  v = String(v);
+  return '"' + v.replace(/"/g,'""') + '"';
+}
+function toCSV(rows){
+  const body = rows.map(r => r.map(csvCell).join(';')).join('\r\n');
+  return '\uFEFF' + body; // BOM — чтобы Excel правильно показывал кириллицу
+}
+function downloadBlob(blob, filename){
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = filename; document.body.appendChild(a); a.click();
+  setTimeout(()=>{ URL.revokeObjectURL(url); a.remove(); }, 1500);
+}
+
+/* --------------------- минимальный ZIP (метод store) -------------------- */
+const CRC_TABLE = (()=>{ const t=new Uint32Array(256);
+  for(let n=0;n<256;n++){ let c=n; for(let k=0;k<8;k++) c = (c&1)?(0xEDB88320^(c>>>1)):(c>>>1); t[n]=c>>>0; } return t; })();
+function crc32(buf){ let c=0xFFFFFFFF; for(let i=0;i<buf.length;i++) c = CRC_TABLE[(c^buf[i])&0xFF] ^ (c>>>8); return (c^0xFFFFFFFF)>>>0; }
+const enc = new TextEncoder();
+async function zipStore(files){
+  // files: [{name:string, data:Uint8Array|Blob}]
+  const parts = [];        // куски итогового файла
+  const central = [];      // записи центрального каталога
+  let offset = 0;
+  for(const f of files){
+    const data = f.data instanceof Blob ? new Uint8Array(await f.data.arrayBuffer()) : f.data;
+    const nameBytes = enc.encode(f.name);
+    const crc = crc32(data);
+    const size = data.length;
+    // локальный заголовок
+    const lh = new Uint8Array(30 + nameBytes.length);
+    const dv = new DataView(lh.buffer);
+    dv.setUint32(0,0x04034b50,true);
+    dv.setUint16(4,20,true);            // version needed
+    dv.setUint16(6,0x0800,true);        // флаг: имена в UTF-8
+    dv.setUint16(8,0,true);             // метод 0 = store
+    dv.setUint16(10,0,true); dv.setUint16(12,0,true); // время/дата
+    dv.setUint32(14,crc,true);
+    dv.setUint32(18,size,true);         // compressed
+    dv.setUint32(22,size,true);         // uncompressed
+    dv.setUint16(26,nameBytes.length,true);
+    dv.setUint16(28,0,true);            // extra len
+    lh.set(nameBytes,30);
+    parts.push(lh, data);
+    // запись центрального каталога
+    const ch = new Uint8Array(46 + nameBytes.length);
+    const cv = new DataView(ch.buffer);
+    cv.setUint32(0,0x02014b50,true);
+    cv.setUint16(4,20,true); cv.setUint16(6,20,true);
+    cv.setUint16(8,0x0800,true); cv.setUint16(10,0,true);
+    cv.setUint16(12,0,true); cv.setUint16(14,0,true);
+    cv.setUint32(16,crc,true);
+    cv.setUint32(20,size,true); cv.setUint32(24,size,true);
+    cv.setUint16(28,nameBytes.length,true);
+    cv.setUint16(30,0,true); cv.setUint16(32,0,true);
+    cv.setUint16(34,0,true); cv.setUint16(36,0,true);
+    cv.setUint32(38,0,true);
+    cv.setUint32(42,offset,true);
+    ch.set(nameBytes,46);
+    central.push(ch);
+    offset += lh.length + size;
+  }
+  const cdSize = central.reduce((a,c)=>a+c.length,0);
+  const cdOffset = offset;
+  const eocd = new Uint8Array(22);
+  const ev = new DataView(eocd.buffer);
+  ev.setUint32(0,0x06054b50,true);
+  ev.setUint16(8,files.length,true);
+  ev.setUint16(10,files.length,true);
+  ev.setUint32(12,cdSize,true);
+  ev.setUint32(16,cdOffset,true);
+  const all = parts.concat(central, [eocd]);
+  return new Blob(all, {type:'application/zip'});
+}
+
+/* --------------------------- IndexedDB ---------------------------------- */
+const DB_NAME = 'trainers-db';
+const DB_VER = 1;
+let _db = null;
+function openDB(){
+  return new Promise((res,rej)=>{
+    const req = indexedDB.open(DB_NAME, DB_VER);
+    req.onupgradeneeded = (e)=>{
+      const db = e.target.result;
+      if(!db.objectStoreNames.contains('patients'))
+        db.createObjectStore('patients',{keyPath:'id',autoIncrement:true});
+      for(const s of ['word_tests','motor_tests','drawing_tests']){
+        if(!db.objectStoreNames.contains(s)){
+          const os = db.createObjectStore(s,{keyPath:'id',autoIncrement:true});
+          os.createIndex('patientId','patientId',{unique:false});
+        }
+      }
+    };
+    req.onsuccess = ()=>{ _db = req.result; res(_db); };
+    req.onerror = ()=>rej(req.error);
+  });
+}
+function tx(store, mode='readonly'){ return _db.transaction(store, mode).objectStore(store); }
+function idbAdd(store, val){ return new Promise((res,rej)=>{ const r=tx(store,'readwrite').add(val); r.onsuccess=()=>res(r.result); r.onerror=()=>rej(r.error); }); }
+function idbPut(store, val){ return new Promise((res,rej)=>{ const r=tx(store,'readwrite').put(val); r.onsuccess=()=>res(r.result); r.onerror=()=>rej(r.error); }); }
+function idbGet(store, key){ return new Promise((res,rej)=>{ const r=tx(store).get(key); r.onsuccess=()=>res(r.result); r.onerror=()=>rej(r.error); }); }
+function idbAll(store){ return new Promise((res,rej)=>{ const r=tx(store).getAll(); r.onsuccess=()=>res(r.result||[]); r.onerror=()=>rej(r.error); }); }
+function idbByPatient(store, pid){ return new Promise((res,rej)=>{ const r=tx(store).index('patientId').getAll(pid); r.onsuccess=()=>res(r.result||[]); r.onerror=()=>rej(r.error); }); }
+function idbDel(store, key){ return new Promise((res,rej)=>{ const r=tx(store,'readwrite').delete(key); r.onsuccess=()=>res(); r.onerror=()=>rej(r.error); }); }
+
+/* --------------------------- роутер ------------------------------------- */
+function go(hash){ if(location.hash===hash) render(); else location.hash=hash; }
+window.addEventListener('hashchange', render);
+
+function setHeader(title, back){
+  titleEl.textContent = title;
+  backBtn.hidden = !back;
+  backBtn.onclick = back ? ()=>go(back) : null;
+}
+
+async function render(){
+  const h = location.hash || '#/';
+  const parts = h.replace(/^#\//,'').split('/'); // ['', ...] or ['patient','3']
+  try{
+    if(h==='#/' || h===''){ return renderHome(); }
+    if(parts[0]==='patient'){ return renderPatient(+parts[1]); }
+    if(parts[0]==='test'){ return renderTest(parts[1], +parts[2]); }
+    if(parts[0]==='result'){ return renderResult(parts[1], +parts[2]); }
+    renderHome();
+  }catch(err){ console.error(err); view.innerHTML = '<div class="empty">Ошибка: '+(err&&err.message||err)+'</div>'; }
+}
+
+/* --------------------------- ЭКРАН: главная ----------------------------- */
+async function renderHome(){
+  setHeader('Тренажёры', null);
+  const patients = (await idbAll('patients')).sort((a,b)=>b.createdAt-a.createdAt);
+  view.innerHTML = `
+    <h2>Пациенты</h2>
+    <div class="card pad" style="margin-bottom:18px">
+      <label class="field"><span>Имя / код пациента</span>
+        <input type="text" id="pName" placeholder="например: Иванов И., №14" autocomplete="off"></label>
+      <div class="row wrap">
+        <label class="field grow" style="margin:0"><span>Дата рождения (необязательно)</span>
+          <input type="date" id="pBirth"></label>
+        <label class="field grow" style="margin:0"><span>Заметка (необязательно)</span>
+          <input type="text" id="pNote" placeholder="диагноз, группа…"></label>
+      </div>
+      <button class="btn-accent btn-block" id="addBtn" style="margin-top:12px">Добавить пациента</button>
+    </div>
+    <div class="row between" style="margin-bottom:10px">
+      <h3 style="margin:0">Список</h3>
+      <span class="small muted" id="cnt"></span>
+    </div>
+    <label class="field" style="margin-bottom:14px">
+      <input type="search" id="search" placeholder="🔎 Поиск по фамилии / коду / заметке…" autocomplete="off"></label>
+    <div class="list" id="plist"></div>
+  `;
+  const plist = $('#plist');
+  // карточки готовим заранее (с подсчётом тестов), потом фильтруем без новых запросов
+  const cards = [];
+  for(const p of patients){
+    const counts = await countsFor(p.id);
+    cards.push({p, counts, hay:(p.name+' '+(p.note||'')).toLowerCase()});
+  }
+  function paintList(q){
+    q = (q||'').trim().toLowerCase();
+    const shown = q ? cards.filter(c=>c.hay.includes(q)) : cards;
+    $('#cnt').textContent = q ? `найдено: ${shown.length} из ${cards.length}` : `всего: ${cards.length}`;
+    plist.innerHTML = '';
+    if(!cards.length){ plist.innerHTML = '<div class="empty">Пока никого нет. Добавьте первого пациента выше.</div>'; return; }
+    if(!shown.length){ plist.innerHTML = '<div class="empty">Никого не нашли по запросу «'+escapeHtml(q)+'».</div>'; return; }
+    for(const {p,counts} of shown){
+      const d = document.createElement('div'); d.className='item';
+      d.innerHTML = `<div><div class="name">${escapeHtml(p.name)}</div>
+        <div class="meta">${p.birth?('р. '+p.birth+' · '):''}${counts} · добавлен ${fmtDate(p.createdAt)}</div></div>
+        <div class="chev">›</div>`;
+      d.onclick = ()=>go('#/patient/'+p.id);
+      plist.appendChild(d);
+    }
+  }
+  paintList('');
+  const sb = $('#search'); sb.oninput = ()=>paintList(sb.value);
+  $('#addBtn').onclick = async ()=>{
+    const name = $('#pName').value.trim();
+    if(!name){ toast('Введите имя/код пациента'); $('#pName').focus(); return; }
+    const id = await idbAdd('patients', {name, birth:$('#pBirth').value||'', note:$('#pNote').value.trim(), createdAt:Date.now()});
+    toast('Пациент добавлен'); go('#/patient/'+id);
+  };
+  $('#pName').focus();
+}
+async function countsFor(pid){
+  const [w,m,d] = await Promise.all([idbByPatient('word_tests',pid),idbByPatient('motor_tests',pid),idbByPatient('drawing_tests',pid)]);
+  return `слова: ${w.length} · моторика: ${m.length} · рисунок: ${d.length}`;
+}
+function escapeHtml(s){ return String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+// нормализация записи теста «слова»: новый формат (массив letters) и старый (плоский)
+function wordLetters(r){
+  if(Array.isArray(r.letters)) return r.letters;
+  return [{letter:r.letter, durationMs:r.durationMs, wordCount:r.wordCount, hasAudio:r.hasAudio, audio:r.audio, audioType:r.audioType}];
+}
+
+/* --------------------------- ЭКРАН: пациент ----------------------------- */
+async function renderPatient(pid){
+  const p = await idbGet('patients', pid);
+  if(!p){ toast('Пациент не найден'); return go('#/'); }
+  setHeader(p.name, '#/');
+  const [words,motor,draws] = await Promise.all([
+    idbByPatient('word_tests',pid), idbByPatient('motor_tests',pid), idbByPatient('drawing_tests',pid)]);
+  view.innerHTML = `
+    <h2>${escapeHtml(p.name)}</h2>
+    <div class="small muted" style="margin:-8px 0 16px">${p.birth?('Дата рождения: '+p.birth+' · '):''}${p.note?escapeHtml(p.note):''}</div>
+
+    <h3>Выбрать тест</h3>
+    <div class="tiles">
+      <button class="tile card" id="tWord"><span class="ti">🗣️</span><span class="tt">Упражнение на слова</span><span class="td">Аудиозапись + число слов на букву</span></button>
+      <button class="tile card" id="tMotor"><span class="ti">🧩</span><span class="tt">Мелкая моторика</span><span class="td">Умный секундомер по рядам</span></button>
+      <button class="tile card" id="tDraw"><span class="ti">✍️</span><span class="tt">Рисовалка</span><span class="td">Обводка стилусом, градиент по времени</span></button>
+    </div>
+
+    <div class="row between" style="margin-top:24px">
+      <h3 style="margin:0">Прохождения</h3>
+      <button class="btn-ghost small" id="expPatient">Экспорт по пациенту ⤓</button>
+    </div>
+    ${resultsBlock('Слова', words, 'word', pid)}
+    ${resultsBlock('Мелкая моторика', motor, 'motor', pid)}
+    ${resultsBlock('Рисунок', draws, 'draw', pid)}
+
+    <div style="margin-top:28px">
+      <button class="btn-ghost small" id="delPatient" style="color:var(--stop)">Удалить пациента и все его данные</button>
+    </div>
+  `;
+  $('#tWord').onclick = ()=>go('#/test/word/'+pid);
+  $('#tMotor').onclick = ()=>go('#/test/motor/'+pid);
+  $('#tDraw').onclick = ()=>go('#/test/draw/'+pid);
+  $('#expPatient').onclick = ()=>exportPatient(p);
+  $('#delPatient').onclick = async ()=>{
+    if(!confirm('Удалить пациента «'+p.name+'» и ВСЕ его прохождения?')) return;
+    for(const w of words) await idbDel('word_tests',w.id);
+    for(const m of motor) await idbDel('motor_tests',m.id);
+    for(const d of draws) await idbDel('drawing_tests',d.id);
+    await idbDel('patients', pid); toast('Удалено'); go('#/');
+  };
+  // привязка кликов по результатам
+  view.querySelectorAll('[data-res]').forEach(node=>{
+    node.onclick = ()=>{ const [t,id]=node.dataset.res.split(':'); go('#/result/'+t+'/'+id); };
+  });
+}
+function resultsBlock(title, list, type, pid){
+  if(!list.length) return `<div class="small muted" style="margin:6px 0 14px">${title}: прохождений нет</div>`;
+  list = list.slice().sort((a,b)=>b.createdAt-a.createdAt);
+  let rows = list.map(r=>{
+    let info='';
+    if(type==='word'){ const L=wordLetters(r); const tw=L.reduce((a,x)=>a+(x.wordCount||0),0); const au=L.some(x=>x.hasAudio);
+      info = `буквы: ${escapeHtml(L.map(x=>x.letter).join(', '))} · ${tw} слов${au?' · 🎙️':''}`; }
+    if(type==='motor') info = `${r.rowsDone} рядов, всего ${fmtSec(r.totalMs)} c`;
+    if(type==='draw') info = `${r.strokeCount} штрихов, ${fmtSec(r.durationMs)} c`;
+    return `<div class="item" data-res="${type}:${r.id}"><div><div class="name" style="font-size:15px">${title}</div>
+      <div class="meta">${info} · ${fmtDate(r.createdAt)}</div></div><div class="chev">›</div></div>`;
+  }).join('');
+  return `<div style="margin:6px 0 4px"><div class="badge">${title}: ${list.length}</div></div><div class="list" style="margin-bottom:14px">${rows}</div>`;
+}
+
+/* --------------------------- роутинг тестов ----------------------------- */
+async function renderTest(type, pid){
+  const p = await idbGet('patients', pid);
+  if(!p){ toast('Пациент не найден'); return go('#/'); }
+  if(type==='word') return wordTest(p);
+  if(type==='motor') return motorTest(p);
+  if(type==='draw') return drawTest(p);
+  go('#/patient/'+pid);
+}
+
+/* ===================== ТЕСТ 1: УПРАЖНЕНИЕ НА СЛОВА ====================== */
+function wordTest(p){
+  setHeader('Слова · '+p.name, '#/patient/'+p.id);
+  let phase='setup'; // setup -> recording -> count
+  let letter='';
+  let startTs=0, rafId=0, timerEl=null;
+  let stream=null, recorder=null, chunks=[], audioBlob=null, durationMs=0;
+  // одна сессия = одна запись в БД; буквы накапливаются в неё
+  let session={ patientId:p.id, letters:[], startedAt:Date.now(), createdAt:Date.now() };
+  let recId=null;
+
+  function paint(){
+    if(phase==='setup'){
+      view.innerHTML = `
+        <h2>Упражнение на слова</h2>
+        <div class="hint" style="margin-bottom:16px">Пациент называет слова на заданную букву. По кнопке «Старт» включается секундомер и запись звука. После «Стоп» введите число названных слов.</div>
+        <div class="card pad">
+          <label class="field"><span>Буква для теста</span>
+            <input type="text" id="letter" maxlength="3" placeholder="например: К" autocomplete="off" style="font-size:28px;text-align:center;text-transform:uppercase"></label>
+          <button class="btn-go btn-block btn-lg" id="startBtn">▶ Старт (запись)</button>
+          <div class="small muted" style="margin-top:10px" id="micNote">Браузер попросит доступ к микрофону при первом запуске.</div>
+        </div>`;
+      const inp=$('#letter'); inp.focus();
+      inp.oninput=()=>{ letter=inp.value.trim(); };
+      $('#startBtn').onclick=start;
+    }
+    if(phase==='recording'){
+      view.innerHTML = `
+        <h2>Буква «${escapeHtml(letter.toUpperCase())}»</h2>
+        <div class="stage">
+          <div class="card pad" style="text-align:center">
+            <div class="row" style="justify-content:center;gap:8px;color:var(--stop);font-weight:700;margin-bottom:4px">
+              <span class="recdot"></span> идёт запись</div>
+            <div class="stopwatch" id="sw">00:00<span class="cs">.0</span></div>
+          </div>
+          <button class="btn-danger btn-block btn-xl" id="stopBtn">■ Стоп</button>
+        </div>`;
+      timerEl=$('#sw'); tick();
+      $('#stopBtn').onclick=stop;
+    }
+    if(phase==='count'){
+      view.innerHTML = `
+        <h2>Буква «${escapeHtml(letter.toUpperCase())}»</h2>
+        <div class="card pad">
+          <div class="row between"><div class="muted small">Время</div><div class="num" style="font-family:var(--mono)">${fmtSec(durationMs)} c</div></div>
+          ${audioBlob?`<audio controls style="width:100%;margin-top:12px" src="${URL.createObjectURL(audioBlob)}"></audio>`:'<div class="hint" style="margin-top:10px">Аудио не записано (нет доступа к микрофону). Будет сохранено только число слов.</div>'}
+          <label class="field" style="margin-top:16px"><span>Число названных слов (с клавиатуры)</span>
+            <input type="number" id="wc" inputmode="numeric" min="0" step="1" placeholder="0" style="font-size:28px;text-align:center"></label>
+          <button class="btn-accent btn-block btn-lg" id="saveBtn">Сохранить прохождение</button>
+        </div>`;
+      const wc=$('#wc'); wc.focus();
+      $('#saveBtn').onclick=()=>save(wc.value);
+    }
+  }
+  function tick(){
+    const ms=performance.now()-startTs; const c=fmtClock(ms);
+    if(timerEl) timerEl.innerHTML = `${c.m}:${c.s}<span class="cs">.${c.d}</span>`;
+    rafId=requestAnimationFrame(tick);
+  }
+  async function start(){
+    if(!letter){ toast('Введите букву'); return; }
+    try{
+      stream = await navigator.mediaDevices.getUserMedia({audio:true});
+      recorder = new MediaRecorder(stream);
+      chunks=[]; recorder.ondataavailable=e=>{ if(e.data.size) chunks.push(e.data); };
+      recorder.start();
+    }catch(err){
+      console.warn('mic',err);
+      toast('Микрофон недоступен — пишем только число слов');
+      stream=null; recorder=null;
+    }
+    startTs=performance.now(); phase='recording'; paint();
+  }
+  function stop(){
+    cancelAnimationFrame(rafId);
+    durationMs = performance.now()-startTs;
+    if(recorder && recorder.state!=='inactive'){
+      recorder.onstop=()=>{
+        audioBlob = new Blob(chunks, {type: recorder.mimeType||'audio/webm'});
+        if(stream) stream.getTracks().forEach(t=>t.stop());
+        phase='count'; paint();
+      };
+      recorder.stop();
+    }else{
+      audioBlob=null; phase='count'; paint();
+    }
+  }
+  async function save(val){
+    const wordCount = Math.max(0, parseInt(val||'0',10)||0);
+    session.letters.push({
+      letter:letter.toUpperCase(), durationMs:Math.round(durationMs), wordCount,
+      hasAudio:!!audioBlob, audio:audioBlob||null, audioType:audioBlob?audioBlob.type:''
+    });
+    session.updatedAt=Date.now();
+    try{
+      if(recId==null){ recId = await idbAdd('word_tests', {...session}); session.id=recId; }
+      else { await idbPut('word_tests', {...session, id:recId}); }
+    }catch(e){ console.error(e); toast('Ошибка сохранения'); }
+    const totalWords = session.letters.reduce((a,l)=>a+l.wordCount,0);
+    const lettersStr = session.letters.map(l=>l.letter).join(', ');
+    toast('Записано: «'+letter.toUpperCase()+'»');
+    // два варианта: ещё буква (в эту же запись) или закончить
+    view.innerHTML = `
+      <h2>Записано ✓</h2>
+      <div class="card pad">
+        <div class="small muted" style="margin-bottom:14px">Буквы в этой записи: <b>${escapeHtml(lettersStr)}</b> · всего слов: ${totalWords}.<br>Последняя — «${escapeHtml(letter.toUpperCase())}»: ${wordCount} слов, ${fmtSec(durationMs)} c${audioBlob?', аудио записано':''}.</div>
+        <button class="btn-accent btn-block btn-lg" id="more">+ Ещё одна буква (в эту же запись)</button>
+        <button class="btn-ghost btn-block" id="fin" style="margin-top:10px">Закончить упражнение</button>
+      </div>`;
+    $('#more').onclick=()=>{ letter=''; audioBlob=null; durationMs=0; phase='setup'; paint(); };
+    $('#fin').onclick=()=>go('#/patient/'+p.id);
+  }
+  paint();
+}
+
+/* ===================== ТЕСТ 2: МЕЛКАЯ МОТОРИКА ========================= */
+function motorTest(p){
+  setHeader('Моторика · '+p.name, '#/patient/'+p.id);
+  let phase='setup';
+  let rowsTarget=6;
+  let events=[];      // {type:'start'|'row_done'|'new_row'|'end', t}
+  let currentRow=0;   // номер текущего ряда (1..rowsTarget)
+  let inRow=false;    // true = ряд идёт; false = пауза между рядами
+  let t0=0, rafId=0, swEl=null, subEl=null;
+
+  function paint(){
+    if(phase==='setup'){
+      view.innerHTML = `
+        <h2>Мелкая моторика</h2>
+        <div class="hint" style="margin-bottom:16px">Умный секундомер. «Старт» → идёт ряд 1. «Ряд закончен» фиксирует конец ряда, «Новый ряд» — начало следующего. На последнем ряду кнопка станет «Конец упражнения». Сохраняются все отметки времени.</div>
+        <div class="card pad">
+          <label class="field"><span>Число рядов</span>
+            <input type="number" id="rows" min="1" max="30" step="1" value="6" style="font-size:24px;text-align:center"></label>
+          <button class="btn-go btn-block btn-xl" id="startBtn">▶ Старт</button>
+        </div>`;
+      $('#rows').oninput=e=>{ rowsTarget=Math.max(1,parseInt(e.target.value||'6',10)||6); };
+      $('#startBtn').onclick=start;
+    } else if(phase==='run'){
+      view.innerHTML = `
+        <h2>Идёт упражнение</h2>
+        <div class="stage">
+          <div class="card pad" style="text-align:center">
+            <div class="muted small" id="sub">Ряд 1 из ${rowsTarget}</div>
+            <div class="stopwatch" id="sw">00:00<span class="cs">.0</span></div>
+          </div>
+          <button class="btn-accent btn-block btn-xl" id="actBtn"></button>
+          <div class="small muted" style="text-align:center" id="log"></div>
+        </div>`;
+      swEl=$('#sw'); subEl=$('#sub');
+      $('#actBtn').onclick=action;
+      updateButton(); updateLog(); tick();
+    }
+  }
+  function tick(){
+    const ms=performance.now()-t0; const c=fmtClock(ms);
+    if(swEl) swEl.innerHTML=`${c.m}:${c.s}<span class="cs">.${c.d}</span>`;
+    rafId=requestAnimationFrame(tick);
+  }
+  function updateButton(){
+    const b=$('#actBtn'); if(!b) return;
+    if(inRow){
+      if(currentRow>=rowsTarget){ b.textContent='■ Конец упражнения'; b.className='btn-danger btn-block btn-xl'; }
+      else { b.textContent='✓ Ряд закончен'; b.className='btn-accent btn-block btn-xl'; }
+    } else {
+      b.textContent='→ Новый ряд'; b.className='btn-go btn-block btn-xl';
+    }
+    if(subEl) subEl.textContent = inRow ? `Ряд ${currentRow} из ${rowsTarget}` : `Пауза · следующий ряд ${currentRow+1}`;
+  }
+  function updateLog(){
+    const l=$('#log'); if(l) l.textContent = `Отметок: ${events.length}`;
+  }
+  function start(){
+    t0=performance.now();
+    events=[{type:'start',t:0}]; currentRow=1; inRow=true;
+    phase='run'; paint();
+  }
+  function action(){
+    const t=Math.round(performance.now()-t0);
+    if(inRow){
+      if(currentRow>=rowsTarget){ events.push({type:'end',t}); return finish(); }
+      events.push({type:'row_done',t}); inRow=false;
+    } else {
+      events.push({type:'new_row',t}); currentRow++; inRow=true;
+    }
+    updateButton(); updateLog();
+  }
+  async function finish(){
+    cancelAnimationFrame(rafId);
+    const m = computeMotor(events);
+    await idbAdd('motor_tests',{
+      patientId:p.id, rowsTarget, rowsDone:m.rows.length,
+      events, totalMs:m.total, rowDurations:m.rows, gapDurations:m.gaps,
+      startedAt:Date.now(), createdAt:Date.now()
+    });
+    toast('Сохранено');
+    view.innerHTML = `
+      <h2>Готово ✓</h2>
+      <div class="card pad">${motorTable(m)}
+        <button class="btn-accent btn-block btn-lg" id="again" style="margin-top:16px">Ещё прохождение</button>
+        <button class="btn-ghost btn-block" id="fin" style="margin-top:10px">К пациенту</button>
+      </div>`;
+    $('#again').onclick=()=>{ phase='setup'; events=[]; paint(); };
+    $('#fin').onclick=()=>go('#/patient/'+p.id);
+  }
+  paint();
+}
+function computeMotor(events){
+  // starts: start + каждый new_row; ends: каждый row_done + final end
+  const starts=[], ends=[];
+  for(const e of events){ if(e.type==='start'||e.type==='new_row') starts.push(e.t); if(e.type==='row_done'||e.type==='end') ends.push(e.t); }
+  const rows=[]; for(let i=0;i<ends.length;i++) rows.push(ends[i]-starts[i]);
+  const gaps=[]; for(let i=0;i<rows.length-1;i++) gaps.push(starts[i+1]-ends[i]);
+  const total = events.length ? events[events.length-1].t - events[0].t : 0;
+  return {rows,gaps,total};
+}
+function motorTable(m){
+  let rows = m.rows.map((d,i)=>`<tr><td>Ряд ${i+1}</td><td class="num">${fmtSec(d)} c</td>
+     <td class="num">${m.gaps[i]!==undefined?fmtSec(m.gaps[i])+' c':'—'}</td></tr>`).join('');
+  return `<table class="data"><thead><tr><th>Этап</th><th>Время ряда</th><th>Пауза после</th></tr></thead>
+    <tbody>${rows}<tr><td><b>Всего</b></td><td class="num"><b>${fmtSec(m.total)} c</b></td><td>—</td></tr></tbody></table>`;
+}
+
+/* ===================== ТЕСТ 3: РИСОВАЛКА =============================== */
+const TEMPLATES = {
+  spiral:{name:'Спираль', draw:(ctx,w,h)=>{ const cx=w/2,cy=h/2; ctx.beginPath();
+    for(let a=0;a<Math.PI*2*5;a+=0.05){ const r=a*Math.min(w,h)/(Math.PI*2*5)/2.2; const x=cx+r*Math.cos(a),y=cy+r*Math.sin(a); a===0?ctx.moveTo(x,y):ctx.lineTo(x,y);} ctx.stroke(); }},
+  star:{name:'Звезда', draw:(ctx,w,h)=>{ const cx=w/2,cy=h/2,R=Math.min(w,h)*0.4,r=R*0.45; ctx.beginPath();
+    for(let i=0;i<=10;i++){ const ang=-Math.PI/2+i*Math.PI/5; const rad=i%2?r:R; const x=cx+rad*Math.cos(ang),y=cy+rad*Math.sin(ang); i===0?ctx.moveTo(x,y):ctx.lineTo(x,y);} ctx.closePath(); ctx.stroke(); }},
+  wave:{name:'Волна', draw:(ctx,w,h)=>{ ctx.beginPath(); const A=h*0.22,mid=h/2; for(let x=w*0.08;x<=w*0.92;x+=2){ const y=mid+A*Math.sin((x-w*0.08)/ (w*0.84)*Math.PI*4); x===Math.floor(w*0.08)?ctx.moveTo(x,y):ctx.lineTo(x,y);} ctx.stroke(); }},
+  square:{name:'Квадрат', draw:(ctx,w,h)=>{ const s=Math.min(w,h)*0.6,x=(w-s)/2,y=(h-s)/2; ctx.strokeRect(x,y,s,s); }},
+};
+function drawTest(p){
+  setHeader('Рисунок · '+p.name, '#/patient/'+p.id);
+  let phase='setup';
+  let tplKey='spiral', stylusOnly=true;
+  let canvas,ctx,bg,bgctx,dpr=1,W=0,H=0;
+  let strokes=[], cur=null, drawing=false, activeId=null, startTs=0;
+
+  function paint(){
+    if(phase==='setup'){
+      view.innerHTML = `
+        <h2>Рисовалка</h2>
+        <div class="hint" style="margin-bottom:14px">Покажите образец пациенту. По «Начать» включается сцена рисования. Рисовать нужно <b>стилусом</b> — ладонь можно класть на экран (см. режим ниже).</div>
+        <div class="card pad">
+          <span class="small" style="font-weight:600;color:var(--ink-soft)">Образец</span>
+          <div class="seg" id="seg" style="margin:8px 0 14px">
+            ${Object.entries(TEMPLATES).map(([k,v])=>`<button data-k="${k}" class="${k===tplKey?'on':''}">${v.name}</button>`).join('')}
+          </div>
+          <canvas id="preview" class="draw" style="height:300px"></canvas>
+          <label class="switch" style="margin-top:14px">
+            <input type="checkbox" id="stylus" ${stylusOnly?'checked':''}> Только стилус (ладонь не рисует)</label>
+          <button class="btn-go btn-block btn-xl" id="startBtn" style="margin-top:14px">▶ Начать</button>
+        </div>`;
+      const pv=$('#preview'); sizeCanvas(pv); const c=pv.getContext('2d');
+      drawTemplate(c, pv._w, pv._h);
+      $('#seg').querySelectorAll('button').forEach(b=>b.onclick=()=>{ tplKey=b.dataset.k; paint(); });
+      $('#stylus').onchange=e=>stylusOnly=e.target.checked;
+      $('#startBtn').onclick=startScene;
+    } else if(phase==='draw'){
+      view.innerHTML = `
+        <h2>Рисует пациент</h2>
+        <div class="stage">
+          <div class="toolbar">
+            <span class="badge">Время <span id="t" style="font-family:var(--mono)">0.0 c</span></span>
+            <span class="badge">Штрихов <span id="ns">0</span></span>
+            <span class="grow"></span>
+            <button class="btn-ghost small" id="undo">↶ Отменить штрих</button>
+            <button class="btn-ghost small" id="clear">Очистить</button>
+          </div>
+          <div style="position:relative">
+            <canvas id="bg" style="position:absolute;inset:0;width:100%;pointer-events:none"></canvas>
+            <canvas id="cv" class="draw" style="height:62vh;position:relative"></canvas>
+          </div>
+          <button class="btn-accent btn-block btn-xl" id="done">Завершить и сохранить</button>
+        </div>`;
+      bg=$('#bg'); canvas=$('#cv');
+      sizeCanvas(canvas); sizeCanvas(bg);
+      ctx=canvas.getContext('2d'); bgctx=bg.getContext('2d');
+      W=canvas._w; H=canvas._h; dpr=canvas._dpr;
+      drawTemplate(bgctx, W, H, true); // бледный образец на фоне
+      redrawLive();
+      bindPointer();
+      startTs=performance.now(); tickT();
+      $('#undo').onclick=()=>{ strokes.pop(); redrawLive(); updMeta(); };
+      $('#clear').onclick=()=>{ strokes=[]; redrawLive(); updMeta(); };
+      $('#done').onclick=finish;
+    }
+  }
+  function sizeCanvas(cv){
+    const rect=cv.getBoundingClientRect(); const d=window.devicePixelRatio||1;
+    cv._w=rect.width; cv._h=rect.height; cv._dpr=d;
+    cv.width=Math.round(rect.width*d); cv.height=Math.round(rect.height*d);
+    const c=cv.getContext('2d'); c.setTransform(d,0,0,d,0,0);
+  }
+  function drawTemplate(c,w,h,faint){
+    c.clearRect(0,0,w,h);
+    c.lineWidth=2; c.strokeStyle = faint ? 'rgba(31,122,140,.18)' : 'rgba(60,77,90,.5)';
+    c.lineCap='round'; c.lineJoin='round';
+    TEMPLATES[tplKey].draw(c,w,h);
+  }
+  function startScene(){ strokes=[]; phase='draw'; paint(); }
+  function tickT(){ const el=$('#t'); if(!el) return; el.textContent=((performance.now()-startTs)/1000).toFixed(1)+' c'; requestAnimationFrame(tickT); }
+  function updMeta(){ const n=$('#ns'); if(n) n.textContent=strokes.length; }
+
+  function allowed(e){ if(!stylusOnly) return true; return e.pointerType==='pen'||e.pointerType==='mouse'; }
+  function pos(e){ const r=canvas.getBoundingClientRect(); return {x:e.clientX-r.left, y:e.clientY-r.top, p:(e.pressure>0?e.pressure:0.5)}; }
+  function bindPointer(){
+    canvas.addEventListener('pointerdown', e=>{
+      if(!allowed(e)) return;
+      e.preventDefault(); canvas.setPointerCapture(e.pointerId);
+      drawing=true; activeId=e.pointerId;
+      cur={points:[]}; strokes.push(cur);
+      addPoint(e);
+    });
+    canvas.addEventListener('pointermove', e=>{
+      if(!drawing||e.pointerId!==activeId) return;
+      if(!allowed(e)) return;
+      e.preventDefault();
+      const evs = e.getCoalescedEvents ? e.getCoalescedEvents() : [e];
+      for(const ev of evs) addPoint(ev);
+      drawSeg();
+    });
+    const end=e=>{ if(e.pointerId!==activeId) return; drawing=false; activeId=null; cur=null; updMeta(); };
+    canvas.addEventListener('pointerup', end);
+    canvas.addEventListener('pointercancel', end);
+    canvas.addEventListener('pointerleave', end);
+  }
+  function addPoint(e){ const r=canvas.getBoundingClientRect();
+    cur.points.push({x:e.clientX-r.left, y:e.clientY-r.top, t:Math.round(performance.now()-startTs), p:(e.pressure>0?e.pressure:0.5)}); }
+  function drawSeg(){ // быстрая дорисовка последнего сегмента (нейтральный цвет во время рисования)
+    const pts=cur.points; if(pts.length<2) return;
+    const a=pts[pts.length-2], b=pts[pts.length-1];
+    ctx.strokeStyle='#39505d'; ctx.lineCap='round'; ctx.lineJoin='round';
+    ctx.lineWidth=1.5+2.5*b.p;
+    ctx.beginPath(); ctx.moveTo(a.x,a.y); ctx.lineTo(b.x,b.y); ctx.stroke();
+  }
+  function redrawLive(){ ctx.clearRect(0,0,W,H);
+    for(const s of strokes){ const pts=s.points; for(let i=1;i<pts.length;i++){
+      ctx.strokeStyle='#39505d'; ctx.lineCap='round'; ctx.lineJoin='round'; ctx.lineWidth=1.5+2.5*pts[i].p;
+      ctx.beginPath(); ctx.moveTo(pts[i-1].x,pts[i-1].y); ctx.lineTo(pts[i].x,pts[i].y); ctx.stroke(); } } }
+
+  function renderGradient(targetCtx, w, h, white){
+    // окрашивание по времени: ранние — синие, поздние — оранжево-красные
+    let maxT=1; for(const s of strokes) for(const pt of s.points) if(pt.t>maxT) maxT=pt.t;
+    targetCtx.clearRect(0,0,w,h);
+    if(white){ targetCtx.fillStyle='#fff'; targetCtx.fillRect(0,0,w,h); }
+    targetCtx.lineCap='round'; targetCtx.lineJoin='round';
+    for(const s of strokes){ const pts=s.points; for(let i=1;i<pts.length;i++){
+      const f=pts[i].t/maxT; const hue=210-190*f; // 210(син)->20(красн)
+      targetCtx.strokeStyle=`hsl(${hue},72%,46%)`; targetCtx.lineWidth=1.6+2.6*pts[i].p;
+      targetCtx.beginPath(); targetCtx.moveTo(pts[i-1].x,pts[i-1].y); targetCtx.lineTo(pts[i].x,pts[i].y); targetCtx.stroke(); } }
+  }
+  async function finish(){
+    const durationMs=Math.round(performance.now()-startTs);
+    const pointCount=strokes.reduce((a,s)=>a+s.points.length,0);
+    if(pointCount<2){ toast('Нарисуйте фигуру стилусом'); return; }
+    // отрисовать градиент на видимом холсте (обратная связь)
+    renderGradient(ctx, W, H, false);
+    // отрисовать на offscreen с белым фоном -> PNG
+    const off=document.createElement('canvas'); off.width=Math.round(W*dpr); off.height=Math.round(H*dpr);
+    const octx=off.getContext('2d'); octx.setTransform(dpr,0,0,dpr,0,0);
+    renderGradient(octx, W, H, true);
+    const imgBlob=await new Promise(res=>off.toBlob(res,'image/png'));
+    await idbAdd('drawing_tests',{
+      patientId:p.id, template:tplKey, templateName:TEMPLATES[tplKey].name,
+      strokes, durationMs, strokeCount:strokes.length, pointCount,
+      canvasW:W, canvasH:H, image:imgBlob, imageType:'image/png',
+      startedAt:Date.now(), createdAt:Date.now()
+    });
+    toast('Рисунок сохранён');
+    view.innerHTML=`
+      <h2>Сохранено ✓</h2>
+      <div class="card pad">
+        <div class="small muted" style="margin-bottom:12px">Образец: ${TEMPLATES[tplKey].name} · ${strokes.length} штрихов · ${pointCount} точек · ${fmtSec(durationMs)} c</div>
+        <img style="width:100%;border:1px solid var(--line);border-radius:12px" src="${URL.createObjectURL(imgBlob)}">
+        <div class="small muted" style="margin-top:8px">Цвет показывает порядок во времени: синий — начало, красный — конец.</div>
+        <button class="btn-accent btn-block btn-lg" id="again" style="margin-top:14px">Ещё рисунок</button>
+        <button class="btn-ghost btn-block" id="fin" style="margin-top:10px">К пациенту</button>
+      </div>`;
+    $('#again').onclick=()=>{ phase='setup'; strokes=[]; paint(); };
+    $('#fin').onclick=()=>go('#/patient/'+p.id);
+  }
+  paint();
+}
+
+/* --------------------------- ЭКРАН: результат --------------------------- */
+async function renderResult(type, id){
+  const store = {word:'word_tests', motor:'motor_tests', draw:'drawing_tests'}[type];
+  const r = await idbGet(store, id);
+  if(!r){ toast('Не найдено'); return go('#/'); }
+  const p = await idbGet('patients', r.patientId);
+  setHeader('Прохождение', '#/patient/'+r.patientId);
+  let inner='';
+  if(type==='word'){
+    const L=wordLetters(r); const tw=L.reduce((a,x)=>a+(x.wordCount||0),0);
+    const rows = L.map((x,i)=>`<tr>
+        <td>${i+1}. «${escapeHtml(x.letter)}»</td>
+        <td class="num">${x.wordCount}</td>
+        <td class="num">${fmtSec(x.durationMs)} c</td>
+        <td>${x.audio?`<audio controls style="width:160px;max-width:46vw" src="${URL.createObjectURL(x.audio)}"></audio>`:'<span class="muted small">нет</span>'}</td>
+      </tr>`).join('');
+    inner = `<div class="small muted" style="margin-bottom:10px">Букв в записи: ${L.length} · всего слов: ${tw} · ${fmtDate(r.createdAt)}</div>
+      <table class="data"><thead><tr><th>Буква</th><th>Слов</th><th>Время</th><th>Аудио</th></tr></thead><tbody>${rows}</tbody></table>`;
+  } else if(type==='motor'){
+    const m={rows:r.rowDurations,gaps:r.gapDurations,total:r.totalMs};
+    inner = motorTable(m)+`<div class="small muted" style="margin-top:8px">Рядов выполнено: ${r.rowsDone} из ${r.rowsTarget}. Дата: ${fmtDate(r.createdAt)}.</div>`;
+  } else {
+    inner = `<img style="width:100%;border:1px solid var(--line);border-radius:12px" src="${URL.createObjectURL(r.image)}">
+      <table class="data" style="margin-top:12px"><tbody>
+      <tr><th>Образец</th><td>${escapeHtml(r.templateName||r.template||'')}</td></tr>
+      <tr><th>Штрихов</th><td class="num">${r.strokeCount}</td></tr>
+      <tr><th>Точек траектории</th><td class="num">${r.pointCount}</td></tr>
+      <tr><th>Время</th><td class="num">${fmtSec(r.durationMs)} c</td></tr>
+      <tr><th>Дата</th><td>${fmtDate(r.createdAt)}</td></tr></tbody></table>`;
+  }
+  view.innerHTML = `
+    <h2>${escapeHtml(p?p.name:'')}</h2>
+    <div class="card pad">${inner}</div>
+    <div class="row wrap" style="margin-top:16px">
+      <button class="btn-accent" id="expOne">Экспорт этого прохождения ⤓</button>
+      <button class="btn-ghost" id="delOne" style="color:var(--stop)">Удалить</button>
+    </div>`;
+  $('#expOne').onclick=()=>exportOne(type, r, p);
+  $('#delOne').onclick=async ()=>{ if(!confirm('Удалить это прохождение?')) return; await idbDel(store,id); toast('Удалено'); go('#/patient/'+r.patientId); };
+}
+
+/* --------------------------- ЭКСПОРТ ------------------------------------ */
+function trajRows(r){
+  const rows=[['stroke','point','t_ms','x','y','pressure']];
+  r.strokes.forEach((s,si)=> s.points.forEach((pt,pi)=> rows.push([si+1,pi+1,pt.t,pt.x.toFixed(2),pt.y.toFixed(2),(pt.p||0).toFixed(3)])));
+  return rows;
+}
+function wordRows(list, withPatient){
+  const head = (withPatient?['patient_id','patient']:[]).concat(['test_id','letter_index','date','letter','word_count','duration_sec','has_audio','audio_file']);
+  const rows=[head];
+  for(const r of list){
+    const L=wordLetters(r);
+    L.forEach((x,i)=>{
+      const af = x.hasAudio ? `word_audio/${r.id}_${safeName(r._pname)}_${i+1}_${safeName(x.letter)}.${audioExt(x.audioType)}` : '';
+      rows.push((withPatient?[r.patientId, r._pname]:[]).concat([r.id, i+1, fmtDate(r.createdAt), x.letter, x.wordCount, fmtSec(x.durationMs), x.hasAudio?'1':'0', af]));
+    });
+  }
+  return rows;
+}
+function wordAudioFiles(r){
+  const out=[]; const L=wordLetters(r);
+  L.forEach((x,i)=>{ if(x.audio) out.push({name:`word_audio/${r.id}_${safeName(r._pname)}_${i+1}_${safeName(x.letter)}.${audioExt(x.audioType)}`, data:x.audio}); });
+  return out;
+}
+function motorRows(list, withPatient){
+  let maxRows=0; for(const r of list) maxRows=Math.max(maxRows, r.rowDurations.length);
+  const head=(withPatient?['patient_id','patient']:[]).concat(['test_id','date','rows_done','rows_target','total_sec']);
+  for(let i=0;i<maxRows;i++){ head.push('row'+(i+1)+'_sec'); if(i<maxRows-1) head.push('gap'+(i+1)+'_'+(i+2)+'_sec'); }
+  const rows=[head];
+  for(const r of list){
+    const line=(withPatient?[r.patientId,r._pname]:[]).concat([r.id, fmtDate(r.createdAt), r.rowsDone, r.rowsTarget, fmtSec(r.totalMs)]);
+    for(let i=0;i<maxRows;i++){ line.push(r.rowDurations[i]!==undefined?fmtSec(r.rowDurations[i]):''); if(i<maxRows-1) line.push(r.gapDurations[i]!==undefined?fmtSec(r.gapDurations[i]):''); }
+    rows.push(line);
+  }
+  return rows;
+}
+function drawRows(list, withPatient){
+  const head=(withPatient?['patient_id','patient']:[]).concat(['test_id','date','template','strokes','points','duration_sec','image_file','trajectory_file']);
+  const rows=[head];
+  for(const r of list){
+    const base=`${r.id}_${safeName(r._pname)}`;
+    rows.push((withPatient?[r.patientId,r._pname]:[]).concat([r.id, fmtDate(r.createdAt), r.templateName||r.template, r.strokeCount, r.pointCount, fmtSec(r.durationMs), `drawing_images/${base}.png`, `drawing_trajectories/${base}.csv`]));
+  }
+  return rows;
+}
+
+async function exportOne(type, r, p){
+  r._pname = p?p.name:('p'+r.patientId);
+  const files=[];
+  const base=`${r._pname?safeName(r._pname):'p'}_${type}_${r.id}`;
+  try{
+    if(type==='word'){
+      files.push({name:base+'.csv', data:enc.encode(toCSV(wordRows([r], true)))});
+      wordAudioFiles(r).forEach(f=>files.push(f));
+    } else if(type==='motor'){
+      files.push({name:base+'.csv', data:enc.encode(toCSV(motorRows([r], true)))});
+    } else {
+      const b=`${r.id}_${safeName(r._pname)}`;
+      files.push({name:base+'.csv', data:enc.encode(toCSV(drawRows([r], true)))});
+      files.push({name:`drawing_trajectories/${b}.csv`, data:enc.encode(toCSV(trajRows(r)))});
+      if(r.image) files.push({name:`drawing_images/${b}.png`, data:r.image});
+    }
+    if(files.length===1){ downloadBlob(new Blob([files[0].data]), files[0].name); }
+    else { downloadBlob(await zipStore(files), base+'.zip'); }
+    toast('Файл выгружен');
+  }catch(e){ console.error(e); toast('Ошибка экспорта'); }
+}
+
+async function exportPatient(p){
+  toast('Готовлю архив…');
+  const [words,motor,draws] = await Promise.all([idbByPatient('word_tests',p.id),idbByPatient('motor_tests',p.id),idbByPatient('drawing_tests',p.id)]);
+  words.forEach(r=>r._pname=p.name); motor.forEach(r=>r._pname=p.name); draws.forEach(r=>r._pname=p.name);
+  const files=[];
+  files.push({name:'patient.csv', data:enc.encode(toCSV([['id','name','birth','note','created'],[p.id,p.name,p.birth||'',p.note||'',fmtDate(p.createdAt)]]))});
+  if(words.length){ files.push({name:'word_tests.csv', data:enc.encode(toCSV(wordRows(words,false)))});
+    for(const r of words) wordAudioFiles(r).forEach(f=>files.push(f)); }
+  if(motor.length){ files.push({name:'motor_tests.csv', data:enc.encode(toCSV(motorRows(motor,false)))}); }
+  if(draws.length){ files.push({name:'drawing_tests.csv', data:enc.encode(toCSV(drawRows(draws,false)))});
+    for(const r of draws){ const b=`${r.id}_${safeName(p.name)}`;
+      files.push({name:`drawing_trajectories/${b}.csv`, data:enc.encode(toCSV(trajRows(r)))});
+      if(r.image) files.push({name:`drawing_images/${b}.png`, data:r.image}); } }
+  if(files.length<=1){ toast('Нет данных для экспорта'); return; }
+  downloadBlob(await zipStore(files), `patient_${safeName(p.name)}.zip`);
+  toast('Архив пациента готов');
+}
+
+async function exportAll(){
+  toast('Готовлю общий архив…');
+  const patients=await idbAll('patients');
+  if(!patients.length){ toast('Нет данных'); return; }
+  const pmap={}; patients.forEach(p=>pmap[p.id]=p.name);
+  const [words,motor,draws]=await Promise.all([idbAll('word_tests'),idbAll('motor_tests'),idbAll('drawing_tests')]);
+  words.forEach(r=>r._pname=pmap[r.patientId]||('p'+r.patientId));
+  motor.forEach(r=>r._pname=pmap[r.patientId]||('p'+r.patientId));
+  draws.forEach(r=>r._pname=pmap[r.patientId]||('p'+r.patientId));
+  const files=[];
+  files.push({name:'patients.csv', data:enc.encode(toCSV([['id','name','birth','note','created']].concat(patients.map(p=>[p.id,p.name,p.birth||'',p.note||'',fmtDate(p.createdAt)]))))});
+  files.push({name:'word_tests.csv', data:enc.encode(toCSV(wordRows(words,true)))});
+  for(const r of words) wordAudioFiles(r).forEach(f=>files.push(f));
+  files.push({name:'motor_tests.csv', data:enc.encode(toCSV(motorRows(motor,true)))});
+  files.push({name:'drawing_tests.csv', data:enc.encode(toCSV(drawRows(draws,true)))});
+  for(const r of draws){ const b=`${r.id}_${safeName(r._pname)}`;
+    files.push({name:`drawing_trajectories/${b}.csv`, data:enc.encode(toCSV(trajRows(r)))});
+    if(r.image) files.push({name:`drawing_images/${b}.png`, data:r.image}); }
+  downloadBlob(await zipStore(files), `export_all_${new Date().toISOString().slice(0,10)}.zip`);
+  toast('Общий архив готов');
+}
+$('#exportAllBtn').onclick=exportAll;
+
+/* --------------------------- старт -------------------------------------- */
+(async ()=>{
+  try{ await openDB(); }
+  catch(e){ view.innerHTML='<div class="empty">Не удалось открыть базу данных. Откройте приложение в обычном (не приватном) окне браузера.</div>'; return; }
+  try{ if(navigator.storage && navigator.storage.persist){ await navigator.storage.persist(); } }catch(e){}
+  render();
+  if('serviceWorker' in navigator && location.protocol.startsWith('http')){
+    navigator.serviceWorker.register('sw.js').catch(()=>{});
+  }
+})();
+</script>
+</body>
+</html>
