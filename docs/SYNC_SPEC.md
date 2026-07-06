@@ -21,7 +21,7 @@
   - часть `manifest` (JSON): `{manifest_version:1, batch_id, source:"planshet", machine:<device_id>, exporter:{name:"planshet", version:<app_version>}, created_at, files:[{path,sha256,size}...], counts:{records:1}}`
   - часть `registry/records.jsonl`: одна строка: `{"uid":"planshet:<device_id>:<test_id>", "patient_ref":{...}, "test":"words"|"motor"|"draw", "timepoint":1|2|null, "condition":null|"pre_load"|"post_load", "operator":<operator_label>, "created_at":<ISO>, "payload":{— все поля теста как в текущих CSV-экспортах —}, "files":["files/audio_1.webm", ...]}`
   - части-файлы: аудио (words), png+траектория-CSV (draw) — пути = files[] манифеста.
-- `batch_id` = `<UTC yyyymmddThhmmssZ>_<device_id>_<test_id>` — детерминирован: повторная отправка того же теста даёт тот же batch_id (узел ответит duplicate — это УСПЕХ, пометить sent).
+- `batch_id` = `<UTC yyyymmddThhmmssZ>_<8 hex>` — СТРОГО общий формат §A (узел валидирует regexp `^\d{8}T\d{6}Z_[0-9a-z]{8}$`; формат с device_id/test_id в batch_id ЗАПРЕЩЁН — отвергнется). Детерминированность повторной отправки: batch_id генерируется ОДИН раз при постановке теста в outbox и хранится в записи outbox — все повторные попытки шлют тот же batch_id (узел ответит duplicate = УСПЕХ, пометить sent). device_id уходит в manifest.machine, test_id — в manifest.source_state.test_id.
 - sha256 файлов — через WebCrypto (crypto.subtle.digest).
 - Ответы: 202/200-duplicate -> status='sent' (+sent_at); 401/403 -> status='auth_error' (баннер «проверь ключ», не ретраить до смены настроек); сеть/5xx -> остаётся pending, ретрай следующим циклом (без экспоненты, цикл и так редкий).
 - UI: бейдж в шапке «Не отправлено: N» + список в настройках (кнопка «отправить сейчас», «показать ошибку»).
@@ -33,4 +33,4 @@
 - CORS: узел разрешает origin планшета (уже учтено на стороне узла; если увидишь CORS-ошибку в тестах против заглушки — фиксируй в PROGRESS, не выдумывай прокси).
 
 ## 6. Тест-план (без реального узла)
-Мини-заглушка `tests/mock_node.py` (stdlib http.server): /api/persons -> 3 синтетических человека; /api/ingest/planshet -> валидирует multipart+манифест+sha256, пишет принятые батчи в папку, повтор batch_id -> {"status":"duplicate"}; режимы сбоев (--fail-next, --unauth)
+Мини-заглушка `tests/mock_node.py` (stdlib http.server): /api/persons -> 3 синтетических человека; /api/ingest/planshet -> валидирует multipart+манифест+sha256, пишет принятые батчи в папку, повтор batch_id -> {"status":"duplicate"}; режимы сбоев (--fail-next, --unauth). Сценарии: (1) онлайн: тест -> в папке заглушки корректный батч; (2) офлайн (заглушка вык
