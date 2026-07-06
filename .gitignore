@@ -1,0 +1,10 @@
+
+# PERSONAL DATA GUARD: real databases/exports live ONLY locally, never in git
+local_data/
+*.mdf
+*.MDF
+*.ldf
+*.LDF
+*.bak
+*.mdb
+*.MDB
