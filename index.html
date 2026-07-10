@@ -1478,13 +1478,32 @@ async function refreshPersons(force){
   return {ok:true, count:rows.length};
 }
 
+/* «Failed to fetch» одинаково выглядит и при непринятом сертификате, и при запрете CORS.
+   Различаем: непрозрачный (no-cors) запрос доходит, если сеть и TLS в порядке. */
+async function nodeReachableOpaque(){
+  const s = await getSettings();
+  const ctl = new AbortController();
+  const timer = setTimeout(()=>ctl.abort(), 8000);
+  try{
+    await fetch(s.nodeUrl.replace(/\/+$/,'') + '/setup/cert', {mode:'no-cors', signal:ctl.signal});
+    return true;
+  }catch(err){ return false; }
+  finally{ clearTimeout(timer); }
+}
+
 async function checkNode(){
   const s = await getSettings();
   if(!syncConfigured(s)) return {ok:false, text:'Заполните адрес узла и ключ.'};
   let res;
   try{ res = await nodeFetch('/api/ingest/status', {}, 12000); }
   catch(err){
-    const cert = s.nodeUrl.replace(/\/+$/,'') + '/setup/cert';
+    const base = s.nodeUrl.replace(/\/+$/,'');
+    if(await nodeReachableOpaque())
+      return {ok:false, text:'Узел отвечает, сеть и сертификат в порядке, но он не разрешает запросы '+
+        'с адреса <b>'+escapeHtml(location.origin)+'</b> (CORS). Браузер блокирует и справочник пациентов, '+
+        'и отправку тестов. Узел должен отдавать заголовок Access-Control-Allow-Origin для этого адреса — '+
+        'это настраивается на стороне узла.'};
+    const cert = base + '/setup/cert';
     return {ok:false, text:'Нет связи с узлом: '+netMessage(err)+
       '. Чаще всего это неустановленный сертификат узла — установите его: '+
       '<a href="'+escapeHtml(cert)+'" target="_blank" rel="noopener">'+escapeHtml(cert)+'</a>. '+
