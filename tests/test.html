@@ -235,11 +235,11 @@ async function run(S){
       {letter:'С', durationMs:9000,  wordCount:4, hasAudio:false, audio:null, audioType:''}
     ]
   };
-  const nodePatient  = {id:1, name:'A-014 — Иванов', nodePerson:{id:'01J0AAAA1', display_code:'A-014', full_name:'Иванов'}};
+  const patientCoded = {id:1, name:'A-014 Иванов'};   // оператор ввёл код+ФИО вручную
   const localPatient = {id:2, name:'Петров П., №7'};
 
   const batchId = S.newBatchId();
-  const w = await S.buildBatch({type:'word', record:wordRec, patient:nodePatient, deviceId:DEV,
+  const w = await S.buildBatch({type:'word', record:wordRec, patient:patientCoded, deviceId:DEV,
     batchId, createdAt: Date.UTC(2026,6,10,9,5,0), timepoint:2, condition:'post_load', operator:'Смирнова'});
 
   check('manifest.machine = device_id', w.manifest.machine === DEV, w.manifest.machine);
@@ -255,7 +255,7 @@ async function run(S){
   check('uid = planshet:<device_id>:<test_id>', w.line.uid === 'planshet:pl-deadbeef:words_12', w.line.uid);
   check('test = words (не word)', w.line.test === 'words');
   check('timepoint/condition/operator доехали', w.line.timepoint===2 && w.line.condition==='post_load' && w.line.operator==='Смирнова');
-  check('patient_ref пациента узла', eq(w.line.patient_ref, {node_person_id:'01J0AAAA1', display_code:'A-014'}));
+  check('patient_ref — всегда local_name (справочник узла не выгружается)', eq(w.line.patient_ref, {local_name:'A-014 Иванов'}));
   check('payload: пункт без аудио -> audio_file = null',
         w.line.payload.items[1].audio_file === null && w.line.payload.items[0].audio_file === 'files/audio_1.webm');
   check('payload: суммарные слова и секунды', w.line.payload.total_words === 11 && w.line.payload.items[0].duration_sec === 12.345);
@@ -281,7 +281,7 @@ async function run(S){
                    strokes:[{points:[{x:1.5,y:2.5,t:0,p:0.5},{x:3.5,y:4.5,t:20,p:0.6}]}],
                    durationMs:4321, strokeCount:1, pointCount:2, canvasW:600, canvasH:400,
                    image:png, imageType:'image/png', createdAt:Date.now()};
-  const db = await S.buildBatch({type:'draw', record:drawRec, patient:nodePatient, deviceId:DEV,
+  const db = await S.buildBatch({type:'draw', record:drawRec, patient:patientCoded, deviceId:DEV,
                                  batchId:S.newBatchId(), createdAt:Date.now()});
   check('рисунок: png + траектория', eq(db.line.files, ['files/drawing.png','files/trajectory.csv']));
   check('рисунок: пути файлов продублированы в payload',
@@ -352,7 +352,8 @@ async function run(S){
   });
   const stores = Array.from(upgraded.objectStoreNames);
   check('версия БД = 2', upgraded.version === 2 && S.DB_VER === 2);
-  check('новые сторы созданы', ['settings','node_persons','outbox'].every(s=>stores.includes(s)), stores.join(','));
+  check('новые сторы созданы', ['settings','outbox'].every(s=>stores.includes(s)), stores.join(','));
+  check('справочник узла не заводится (persona базы наружу нет)', !stores.includes('node_persons'), stores.join(','));
   check('старые сторы на месте', ['patients','word_tests','motor_tests','drawing_tests'].every(s=>stores.includes(s)));
   const obIdx = Array.from(upgraded.transaction('outbox').objectStore('outbox').indexNames);
   check('индексы outbox: status и уникальный testKey',
@@ -452,7 +453,8 @@ async function run(S){
 
 (async ()=>{
   try{
-    const html = await (await fetch('../index.html')).text();
+    // cache-bust + no-store: иначе service worker приложения отдаст старую копию index.html
+    const html = await (await fetch('../index.html?testbust=' + Math.random(), {cache:'no-store'})).text();
     const code = html.match(/<script>([\s\S]*?)<\/script>/)[1];
     const tag = document.createElement('script');
     tag.textContent = code;

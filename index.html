@@ -143,7 +143,6 @@
   .pill-auth{background:#fdf3e3;color:var(--warn)}
   .pill-error{background:#fbe9e7;color:var(--stop)}
   .mono{font-family:var(--mono);font-size:12px}
-  .np-item{cursor:pointer}
   .scan{position:fixed;inset:0;z-index:60;background:#000;display:flex;flex-direction:column}
   .scan video{flex:1;width:100%;object-fit:cover;background:#000}
   .scan .scan-bar{padding:14px 16px;background:var(--ink);color:#fff;display:flex;gap:12px;align-items:center}
@@ -283,7 +282,7 @@ async function zipStore(files){
 
 /* --------------------------- IndexedDB ---------------------------------- */
 const DB_NAME = 'trainers-db';
-const DB_VER = 2;   // v2: сторы sync-слоя (settings, node_persons, outbox)
+const DB_VER = 2;   // v2: сторы sync-слоя (settings, outbox)
 let _db = null;
 function upgradeDB(db){
   // Только создание недостающих сторов: существующие данные не трогаем.
@@ -297,8 +296,6 @@ function upgradeDB(db){
   }
   if(!db.objectStoreNames.contains('settings'))
     db.createObjectStore('settings',{keyPath:'key'});
-  if(!db.objectStoreNames.contains('node_persons'))
-    db.createObjectStore('node_persons',{keyPath:'id'});
   if(!db.objectStoreNames.contains('outbox')){
     const ob = db.createObjectStore('outbox',{keyPath:'id',autoIncrement:true});
     ob.createIndex('status','status',{unique:false});
@@ -321,7 +318,6 @@ function idbGet(store, key){ return new Promise((res,rej)=>{ const r=tx(store).g
 function idbAll(store){ return new Promise((res,rej)=>{ const r=tx(store).getAll(); r.onsuccess=()=>res(r.result||[]); r.onerror=()=>rej(r.error); }); }
 function idbByPatient(store, pid){ return new Promise((res,rej)=>{ const r=tx(store).index('patientId').getAll(pid); r.onsuccess=()=>res(r.result||[]); r.onerror=()=>rej(r.error); }); }
 function idbDel(store, key){ return new Promise((res,rej)=>{ const r=tx(store,'readwrite').delete(key); r.onsuccess=()=>res(); r.onerror=()=>rej(r.error); }); }
-function idbClear(store){ return new Promise((res,rej)=>{ const r=tx(store,'readwrite').clear(); r.onsuccess=()=>res(); r.onerror=()=>rej(r.error); }); }
 function idbIndexGet(store, index, key){ return new Promise((res,rej)=>{ const r=tx(store).index(index).get(key); r.onsuccess=()=>res(r.result); r.onerror=()=>rej(r.error); }); }
 function idbIndexAll(store, index, key){ return new Promise((res,rej)=>{ const r=tx(store).index(index).getAll(key); r.onsuccess=()=>res(r.result||[]); r.onerror=()=>rej(r.error); }); }
 
@@ -363,34 +359,18 @@ async function render(){
 async function renderHome(){
   setHeader('Тренажёры', null);
   const patients = (await idbAll('patients')).sort((a,b)=>b.createdAt-a.createdAt);
-  const settings = await getSettings();
-  const nodeMode = syncConfigured(settings);   // без узла экран ровно такой, как был
   view.innerHTML = `
     <h2>Пациенты</h2>
     <div class="card pad" style="margin-bottom:18px">
-      ${nodeMode ? `
-      <div id="nodePick">
-        <label class="field"><span>Пациент из списка узла</span>
-          <input type="search" id="npSearch" placeholder="Поиск по коду или ФИО…" autocomplete="off"></label>
-        <div class="list" id="npList"></div>
-        <div class="row between" style="margin-top:10px">
-          <span class="small muted" id="npMeta"></span>
-          <button class="btn-ghost small" id="npRefresh">Обновить список</button>
-        </div>
-        <button class="btn-ghost btn-block" id="npManual" style="margin-top:12px">Нет в списке — ввести имя вручную</button>
-      </div>` : ''}
-      <div id="manualAdd" ${nodeMode?'hidden':''}>
-        <label class="field"><span>Имя / код пациента</span>
-          <input type="text" id="pName" placeholder="например: Иванов И., №14" autocomplete="off"></label>
-        <div class="row wrap">
-          <label class="field grow" style="margin:0"><span>Дата рождения (необязательно)</span>
-            <input type="date" id="pBirth"></label>
-          <label class="field grow" style="margin:0"><span>Заметка (необязательно)</span>
-            <input type="text" id="pNote" placeholder="диагноз, группа…"></label>
-        </div>
-        <button class="btn-accent btn-block" id="addBtn" style="margin-top:12px">Добавить пациента</button>
-        ${nodeMode ? `<button class="btn-ghost btn-block small" id="npBack" style="margin-top:10px">← Вернуться к списку узла</button>` : ''}
+      <label class="field"><span>Имя / код пациента</span>
+        <input type="text" id="pName" placeholder="например: Иванов И., №14" autocomplete="off"></label>
+      <div class="row wrap">
+        <label class="field grow" style="margin:0"><span>Дата рождения (необязательно)</span>
+          <input type="date" id="pBirth"></label>
+        <label class="field grow" style="margin:0"><span>Заметка (необязательно)</span>
+          <input type="text" id="pNote" placeholder="диагноз, группа…"></label>
       </div>
+      <button class="btn-accent btn-block" id="addBtn" style="margin-top:12px">Добавить пациента</button>
     </div>
     <div class="row between" style="margin-bottom:10px">
       <h3 style="margin:0">Список</h3>
@@ -400,7 +380,6 @@ async function renderHome(){
       <input type="search" id="search" placeholder="🔎 Поиск по фамилии / коду / заметке…" autocomplete="off"></label>
     <div class="list" id="plist"></div>
   `;
-  if(nodeMode) await wireNodePicker();
   const plist = $('#plist');
   // карточки готовим заранее (с подсчётом тестов), потом фильтруем без новых запросов
   const cards = [];
@@ -417,7 +396,7 @@ async function renderHome(){
     if(!shown.length){ plist.innerHTML = '<div class="empty">Никого не нашли по запросу «'+escapeHtml(q)+'».</div>'; return; }
     for(const {p,counts} of shown){
       const d = document.createElement('div'); d.className='item';
-      d.innerHTML = `<div><div class="name">${escapeHtml(p.name)}${p.nodePerson?' <span class="pill pill-sent">узел</span>':''}</div>
+      d.innerHTML = `<div><div class="name">${escapeHtml(p.name)}</div>
         <div class="meta">${p.birth?('р. '+p.birth+' · '):''}${counts} · добавлен ${fmtDate(p.createdAt)}</div></div>
         <div class="chev">›</div>`;
       d.onclick = ()=>go('#/patient/'+p.id);
@@ -432,63 +411,7 @@ async function renderHome(){
     const id = await idbAdd('patients', {name, birth:$('#pBirth').value||'', note:$('#pNote').value.trim(), createdAt:Date.now()});
     toast('Пациент добавлен'); go('#/patient/'+id);
   };
-  if(nodeMode){ const q=$('#npSearch'); if(q) q.focus(); }
-  else $('#pName').focus();
-}
-
-/* Выбор пациента из кэша узла. «Нет в списке» -> обычная локальная форма. */
-async function wireNodePicker(){
-  const listEl = $('#npList'), metaEl = $('#npMeta'), searchEl = $('#npSearch');
-  let persons = await idbAll('node_persons');
-
-  function paint(q){
-    q = (q||'').trim().toLowerCase();
-    const shown = (q ? persons.filter(p=>((p.display_code||'')+' '+(p.full_name||'')).toLowerCase().includes(q)) : persons).slice(0,50);
-    listEl.innerHTML = '';
-    if(!persons.length){
-      listEl.innerHTML = '<div class="empty small">Список узла пуст. Нажмите «Обновить список» (нужна связь с узлом) или введите имя вручную.</div>';
-      return;
-    }
-    if(!shown.length){ listEl.innerHTML = '<div class="empty small">Никого не нашли по запросу «'+escapeHtml(q)+'».</div>'; return; }
-    for(const person of shown){
-      const d = document.createElement('div'); d.className='item np-item';
-      d.innerHTML = `<div><div class="name">${escapeHtml(person.display_code||person.id)}</div>
-        <div class="meta">${escapeHtml(person.full_name||'без ФИО')}</div></div><div class="chev">›</div>`;
-      d.onclick = ()=>pickNodePerson(person);
-      listEl.appendChild(d);
-    }
-  }
-  async function paintMeta(){
-    const meta = await idbGet('settings','persons_meta');
-    metaEl.textContent = meta ? `в кэше: ${persons.length} · обновлено ${fmtDate(meta.at)}` : 'список ещё не загружался';
-  }
-  paint(''); paintMeta();
-
-  searchEl.oninput = ()=>paint(searchEl.value);
-  $('#npRefresh').onclick = async ()=>{
-    toast('Загружаю список узла…');
-    const r = await refreshPersons(true);
-    if(!r.ok){ toast('Не удалось: '+r.reason); return; }
-    persons = await idbAll('node_persons');
-    paint(searchEl.value); await paintMeta();
-    toast('Загружено: '+persons.length);
-  };
-  $('#npManual').onclick = ()=>{ $('#nodePick').hidden=true; $('#manualAdd').hidden=false; $('#pName').focus(); };
-  const back = $('#npBack');
-  if(back) back.onclick = ()=>{ $('#manualAdd').hidden=true; $('#nodePick').hidden=false; searchEl.focus(); };
-}
-
-async function pickNodePerson(person){
-  // один человек узла = один локальный пациент; повторный выбор открывает существующего
-  const existing = (await idbAll('patients')).find(p=>p.nodePerson && p.nodePerson.id===person.id);
-  if(existing){ toast('Пациент уже заведён'); return go('#/patient/'+existing.id); }
-  const name = [person.display_code, person.full_name].filter(Boolean).join(' — ') || person.id;
-  const id = await idbAdd('patients', {
-    name, birth:'', note:'', createdAt:Date.now(),
-    nodePerson:{id:person.id, display_code:person.display_code||'', full_name:person.full_name||''}
-  });
-  toast('Пациент добавлен из списка узла');
-  go('#/patient/'+id);
+  $('#pName').focus();
 }
 async function countsFor(pid){
   const [w,m,d] = await Promise.all([idbByPatient('word_tests',pid),idbByPatient('motor_tests',pid),idbByPatient('drawing_tests',pid)]);
@@ -512,8 +435,7 @@ async function renderPatient(pid){
   const ctx = sessionCtxFor(pid);
   view.innerHTML = `
     <h2>${escapeHtml(p.name)}</h2>
-    <div class="small muted" style="margin:-8px 0 16px">${p.birth?('Дата рождения: '+p.birth+' · '):''}${p.note?escapeHtml(p.note):''}${
-      p.nodePerson?`${p.birth||p.note?' · ':''}узел: ${escapeHtml(p.nodePerson.display_code||p.nodePerson.id)}`:''}</div>
+    <div class="small muted" style="margin:-8px 0 16px">${p.birth?('Дата рождения: '+p.birth+' · '):''}${p.note?escapeHtml(p.note):''}</div>
 
     ${nodeMode ? `
     <h3>Условия прохождения</h3>
@@ -1179,7 +1101,6 @@ $('#exportAllBtn').onclick=exportAll;
 const APP_VERSION      = '1.1.0';
 const DEFAULT_NODE_URL = 'https://storage.lan';
 const SYNC_PERIOD_MS   = 60000;          // фоновый цикл отправки
-const PERSONS_TTL_MS   = 15*60*1000;     // как часто обновлять справочник узла
 const BATCH_ID_RE      = /^\d{8}T\d{6}Z_[0-9a-z]{8}$/;  // общий формат §A, узел его валидирует
 const TEST_KIND  = {word:'words',      motor:'motor',       draw:'draw'};
 const TEST_STORE = {word:'word_tests', motor:'motor_tests', draw:'drawing_tests'};
@@ -1249,8 +1170,8 @@ function secs(ms){ return Math.round(ms||0)/1000; }
 function isoOf(ms){ return new Date(ms||Date.now()).toISOString(); }
 
 function patientRef(p){
-  if(p && p.nodePerson && p.nodePerson.id)
-    return {node_person_id:p.nodePerson.id, display_code:p.nodePerson.display_code||null};
+  // Оператор вводит ФИО на планшете; сшивку с человеком делает identity-метод узла
+  // (ingester/adapters/planshet.py, путь local_name). Справочник узла наружу не отдаётся.
   return {local_name: p ? p.name : ''};
 }
 function dataFilesFor(type, r){
@@ -1455,29 +1376,6 @@ async function syncTick(manual){
   finally{ syncRunning=false; updateSyncUI(); }
 }
 
-async function refreshPersons(force){
-  const s = await getSettings();
-  if(!syncConfigured(s)) return {ok:false, reason:'узел не настроен'};
-  if(!navigator.onLine)  return {ok:false, reason:'нет сети'};
-  const meta = await idbGet('settings','persons_meta');
-  if(!force && meta && Date.now()-meta.at < PERSONS_TTL_MS) return {ok:true, cached:true};
-  let res;
-  try{ res = await nodeFetch('/api/persons?limit=500', {}, 15000); }
-  catch(err){ return {ok:false, reason:netMessage(err)}; }
-  if(res.status===401 || res.status===403) return {ok:false, reason:'узел отклонил ключ (HTTP '+res.status+')'};
-  if(!res.ok) return {ok:false, reason:'узел ответил HTTP '+res.status};
-  let rows;
-  try{ rows = await res.json(); }catch(err){ return {ok:false, reason:'узел вернул не JSON'}; }
-  if(!Array.isArray(rows)) return {ok:false, reason:'узел вернул не список'};
-  await idbClear('node_persons');
-  for(const p of rows){
-    if(p && p.id!=null) await idbPut('node_persons',
-      {id:String(p.id), display_code:p.display_code||'', full_name:p.full_name||''});
-  }
-  await idbPut('settings', {key:'persons_meta', at:Date.now(), count:rows.length});
-  return {ok:true, count:rows.length};
-}
-
 /* «Failed to fetch» одинаково выглядит и при непринятом сертификате, и при запрете CORS.
    Различаем: непрозрачный (no-cors) запрос доходит, если сеть и TLS в порядке. */
 async function nodeReachableOpaque(){
@@ -1500,19 +1398,19 @@ async function checkNode(){
     const base = s.nodeUrl.replace(/\/+$/,'');
     if(await nodeReachableOpaque())
       return {ok:false, text:'Узел отвечает, сеть и сертификат в порядке, но он не разрешает запросы '+
-        'с адреса <b>'+escapeHtml(location.origin)+'</b> (CORS). Браузер блокирует и справочник пациентов, '+
-        'и отправку тестов. Узел должен отдавать заголовок Access-Control-Allow-Origin для этого адреса — '+
-        'это настраивается на стороне узла.'};
+        'с адреса <b>'+escapeHtml(location.origin)+'</b> (CORS), поэтому браузер блокирует отправку тестов. '+
+        'На стороне узла добавьте этот адрес в PLANSHET_CORS_ORIGINS (заголовок Access-Control-Allow-Origin).'};
     const cert = base + '/setup/cert';
     return {ok:false, text:'Нет связи с узлом: '+netMessage(err)+
       '. Чаще всего это неустановленный сертификат узла — установите его: '+
       '<a href="'+escapeHtml(cert)+'" target="_blank" rel="noopener">'+escapeHtml(cert)+'</a>. '+
       'Проверьте также адрес и то, что планшет в сети узла.'};
   }
-  if(res.status===200) return {ok:true, text:'Узел отвечает, ключ принят.'};
+  if(res.status===200) return {ok:true, text:'Связь с узлом есть, ключ принят.'};
   if(res.status===401 || res.status===403)
-    return {ok:true, warn:true, text:'Узел отвечает (HTTP '+res.status+'): связь и сертификат в порядке. '+
-      'Этот эндпоинт требует входа оператора, поэтому ответ ожидаем; на отправку тестов не влияет.'};
+    return {ok:true, warn:true, text:'Связь с узлом есть (HTTP '+res.status+'): сеть, сертификат и CORS в порядке. '+
+      'Этот эндпоинт требует входа оператора, поэтому 401 ожидаем и не мешает отправке. '+
+      'Сам ключ проверится при первой отправке теста.'};
   return {ok:true, warn:true, text:'Узел ответил HTTP '+res.status+'.'};
 }
 
@@ -1538,9 +1436,8 @@ async function startSync(){
   await updateSyncUI();
   const s = await getSettings();
   if(!syncConfigured(s)) return;                   // ни одного запроса без настроек
-  syncTimer = setInterval(()=>{ syncTick(); refreshPersons(false).catch(()=>{}); }, SYNC_PERIOD_MS);
+  syncTimer = setInterval(()=>{ syncTick(); }, SYNC_PERIOD_MS);
   syncTick();
-  refreshPersons(false).catch(()=>{});
 }
 window.addEventListener('online', ()=>{ syncTick(); });
 
@@ -1569,13 +1466,7 @@ async function renderSettings(){
       <div id="checkOut" class="small" style="margin-top:12px"></div>
     </div>
 
-    <h3>Справочник пациентов узла</h3>
-    <div class="card pad" style="margin-bottom:18px">
-      <div class="row between">
-        <span class="small muted" id="pMeta">—</span>
-        <button class="btn-ghost small" id="pRefresh">Обновить сейчас</button>
-      </div>
-    </div>
+    <div class="hint" style="margin-bottom:18px">Пациента заводит оператор вручную (ФИО/код на главном экране). Узел сам сопоставит запись с человеком — справочник пациентов на планшет не выгружается.</div>
 
     <div class="row between" style="margin-bottom:10px">
       <h3 style="margin:0">Очередь отправки</h3>
@@ -1609,16 +1500,6 @@ async function renderSettings(){
       toast('Узел подключён по QR');
       renderSettings();
     }catch(err){ toast(err.message || 'Сканирование не удалось'); }
-  };
-
-  const meta = await idbGet('settings','persons_meta');
-  const cached = await idbAll('node_persons');
-  $('#pMeta').textContent = meta ? `в кэше: ${cached.length} · обновлено ${fmtDate(meta.at)}` : 'список ещё не загружался';
-  $('#pRefresh').onclick = async ()=>{
-    toast('Загружаю…');
-    const r = await refreshPersons(true);
-    toast(r.ok ? ('Загружено: '+(r.count!=null?r.count:'из кэша')) : ('Не удалось: '+r.reason));
-    renderSettings();
   };
 
   $('#sendNow').onclick = async ()=>{ toast('Отправляю…'); await syncTick(true); renderSettings(); };
