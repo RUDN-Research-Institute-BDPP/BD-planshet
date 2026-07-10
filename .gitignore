@@ -1,6 +1,8 @@
 
 # PERSONAL DATA GUARD: real databases/exports live ONLY locally, never in git
 local_data/
+# batches accepted by tests/mock_node.py during manual runs
+tests/_batches/
 *.mdf
 *.MDF
 *.ldf

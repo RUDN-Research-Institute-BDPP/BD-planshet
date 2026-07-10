@@ -1,0 +1,471 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>Planshet — тесты sync-слоя</title>
+<style>
+  body{font:14px/1.45 system-ui,Segoe UI,Roboto,sans-serif;margin:24px;color:#0f2230;background:#eef1f3}
+  h1{font-size:20px} h2{font-size:15px;margin:22px 0 8px;text-transform:uppercase;letter-spacing:.5px;color:#3b4d5a}
+  .r{padding:4px 10px;border-radius:8px;margin:3px 0;background:#fff;border:1px solid #dfe5e9}
+  .ok::before{content:'PASS ';color:#2f8f5b;font-weight:700}
+  .no{background:#fbe9e7;border-color:#f0b9b2}
+  .no::before{content:'FAIL ';color:#b8463c;font-weight:700}
+  #sum{font-weight:700;font-size:16px;padding:10px 14px;border-radius:10px;background:#fff;border:1px solid #dfe5e9}
+  code{font-family:ui-monospace,Consolas,monospace;font-size:12px}
+  #stage{display:none}
+</style>
+</head>
+<body>
+<h1>Тесты sync-слоя Planshet</h1>
+<p class="r">Запуск: со статического сервера в корне репозитория (страница читает
+<code>../index.html</code> и исполняет его код — тестируется сам продукт, а не копия).
+Результаты дублируются в консоль.</p>
+<div id="sum">Выполняю…</div>
+<div id="out"></div>
+
+<!-- заглушки DOM, которые index.html ожидает при загрузке -->
+<div id="stage">
+  <button class="back" id="backBtn" hidden></button><h1 id="title"></h1>
+  <button id="syncBtn" hidden></button><button id="exportAllBtn"></button><button id="settingsBtn"></button>
+  <div id="banner" hidden></div><main id="view"></main><div id="toast"></div>
+</div>
+
+<script>
+"use strict";
+window.__PLANSHET_NO_BOOT__ = true;   // index.html не поднимает БД и не рисует UI
+
+/* ------------------------------ харнесс ---------------------------------- */
+let passed = 0, failed = 0;
+const out = document.getElementById('out');
+function section(name){ const h = document.createElement('h2'); h.textContent = name; out.appendChild(h); }
+function check(name, cond, extra){
+  const div = document.createElement('div');
+  div.className = 'r ' + (cond ? 'ok' : 'no');
+  div.textContent = name + (cond || extra===undefined ? '' : ' — ' + extra);
+  out.appendChild(div);
+  if(cond){ passed++; console.log('PASS', name); }
+  else { failed++; console.error('FAIL', name, extra===undefined ? '' : extra); }
+}
+const eq = (a,b)=>JSON.stringify(a)===JSON.stringify(b);
+
+/* ---------------------- независимый разбор multipart ---------------------- */
+function findBytes(hay, needle, from){
+  outer: for(let i=from; i<=hay.length-needle.length; i++){
+    for(let j=0;j<needle.length;j++) if(hay[i+j]!==needle[j]) continue outer;
+    return i;
+  }
+  return -1;
+}
+const ascii = s=>Uint8Array.from(s, c=>c.charCodeAt(0));
+
+/* Разбирает ровно то, что уйдёт по проводу: тело Request с FormData. */
+async function wireParts(formData){
+  const req = new Request('http://node.test/api/ingest/planshet', {method:'POST', body:formData});
+  const ct = req.headers.get('content-type') || '';
+  const boundary = ct.split('boundary=')[1];
+  const body = new Uint8Array(await req.arrayBuffer());
+  const sep = ascii('--' + boundary);
+  const parts = {};
+  let at = findBytes(body, sep, 0);
+  while(at >= 0){
+    let start = at + sep.length;
+    if(body[start]===45 && body[start+1]===45) break;                 // закрывающая граница
+    while(body[start]===13 || body[start]===10) start++;
+    const headEnd = findBytes(body, ascii('\r\n\r\n'), start);
+    if(headEnd < 0) break;
+    const head = new TextDecoder().decode(body.subarray(start, headEnd));
+    const next = findBytes(body, sep, headEnd + 4);
+    let end = next < 0 ? body.length : next;
+    if(body[end-1]===10 && body[end-2]===13) end -= 2;                 // CRLF перед границей
+    const name = (head.match(/name="([^"]*)"/) || [])[1];
+    parts[name] = body.subarray(headEnd + 4, end);
+    at = next;
+  }
+  return {parts, boundary, size: body.length};
+}
+async function sha256(bytes){
+  const d = await crypto.subtle.digest('SHA-256', bytes);
+  return Array.from(new Uint8Array(d), b=>b.toString(16).padStart(2,'0')).join('');
+}
+
+/* ============================ QR: кодировщик ============================== */
+/* Нужен только тестам: гоняем декодер из index.html туда-обратно.            */
+const GF_EXP = new Uint8Array(512), GF_LOG = new Uint8Array(256);
+(function(){ let x=1; for(let i=0;i<255;i++){ GF_EXP[i]=x; GF_LOG[x]=i; x=(x<<1)^((x&0x80)?0x11D:0);} for(let i=255;i<512;i++) GF_EXP[i]=GF_EXP[i-255]; })();
+const gmul = (a,b)=> (a&&b) ? GF_EXP[GF_LOG[a]+GF_LOG[b]] : 0;
+function rsGenerator(deg){
+  let g = [1];
+  let root = 1;
+  for(let i=0;i<deg;i++){
+    const ng = new Array(g.length+1).fill(0);
+    for(let j=0;j<g.length;j++){ ng[j] ^= g[j]; ng[j+1] ^= gmul(g[j], root); }
+    g = ng; root = gmul(root, 2);
+  }
+  return g;
+}
+function rsEncode(data, deg){
+  const g = rsGenerator(deg);
+  const res = new Uint8Array(data.length + deg);
+  res.set(data);
+  for(let i=0;i<data.length;i++){
+    const coef = res[i];
+    if(!coef) continue;
+    for(let j=1;j<=deg;j++) res[i+j] ^= gmul(g[j], coef);
+  }
+  return res.slice(data.length);
+}
+function qrEncode(text, ecl, mask, internals){
+  const {rawCodewords, ECC_PER_BLOCK, ECC_BLOCKS, alignPositions, formatBitsOf, versionBitsOf, maskBit} = internals;
+  const bytes = new TextEncoder().encode(text);
+  let ver = 1;
+  for(; ver<=40; ver++){
+    const dataCw = rawCodewords(ver) - ECC_PER_BLOCK[ecl][ver-1]*ECC_BLOCKS[ecl][ver-1];
+    if(4 + (ver<10?8:16) + bytes.length*8 <= dataCw*8) break;
+  }
+  if(ver > 40) throw new Error('payload too long');
+
+  const bits = [];
+  const push = (v,n)=>{ for(let i=n-1;i>=0;i--) bits.push((v>>>i)&1); };
+  push(4, 4); push(bytes.length, ver<10?8:16);
+  for(const b of bytes) push(b, 8);
+
+  const blocks = ECC_BLOCKS[ecl][ver-1], ecLen = ECC_PER_BLOCK[ecl][ver-1], raw = rawCodewords(ver);
+  const capBits = (raw - ecLen*blocks) * 8;
+  push(0, Math.min(4, capBits - bits.length));
+  while(bits.length % 8) bits.push(0);
+  const dataCw = [];
+  for(let i=0;i<bits.length;i+=8){ let v=0; for(let j=0;j<8;j++) v=(v<<1)|bits[i+j]; dataCw.push(v); }
+  for(let pad=0xEC; dataCw.length < capBits/8; pad ^= 0xEC^0x11) dataCw.push(pad);
+
+  const shortLen = Math.floor(raw/blocks), numShort = blocks - (raw % blocks);
+  const dat = [], ecs = [];
+  let k = 0;
+  for(let b=0;b<blocks;b++){
+    const dl = (b<numShort ? shortLen : shortLen+1) - ecLen;
+    const d = dataCw.slice(k, k+dl); k += dl;
+    dat.push(d); ecs.push(rsEncode(Uint8Array.from(d), ecLen));
+  }
+  const all = [];
+  const maxData = shortLen + 1 - ecLen;
+  for(let i=0;i<maxData;i++) for(let b=0;b<blocks;b++) if(i < dat[b].length) all.push(dat[b][i]);
+  for(let i=0;i<ecLen;i++) for(let b=0;b<blocks;b++) all.push(ecs[b][i]);
+
+  const size = ver*4 + 17;
+  const M = [], F = [];
+  for(let i=0;i<size;i++){ M.push(new Uint8Array(size)); F.push(new Uint8Array(size)); }
+  const set = (x,y,v)=>{ if(x<0||y<0||x>=size||y>=size) return; M[y][x] = v?1:0; F[y][x] = 1; };
+
+  for(const [cx,cy] of [[3,3],[size-4,3],[3,size-4]])
+    for(let dy=-4;dy<=4;dy++) for(let dx=-4;dx<=4;dx++){
+      const d = Math.max(Math.abs(dx), Math.abs(dy));
+      set(cx+dx, cy+dy, d!==2 && d!==4);
+    }
+  for(let i=0;i<size;i++){
+    if(!F[6][i]) set(i, 6, i%2===0);
+    if(!F[i][6]) set(6, i, i%2===0);
+  }
+  const pos = alignPositions(ver);
+  for(const ay of pos) for(const ax of pos){
+    if((ax===6&&ay===6)||(ax===6&&ay===size-7)||(ax===size-7&&ay===6)) continue;
+    for(let dy=-2;dy<=2;dy++) for(let dx=-2;dx<=2;dx++)
+      set(ax+dx, ay+dy, Math.max(Math.abs(dx), Math.abs(dy)) !== 1);
+  }
+  const gb = (v,i)=>(v>>>i)&1;
+  const fb = formatBitsOf({L:1,M:0,Q:3,H:2}[ecl], mask);
+  for(let i=0;i<=5;i++) set(8, i, gb(fb,i));
+  set(8,7,gb(fb,6)); set(8,8,gb(fb,7)); set(7,8,gb(fb,8));
+  for(let i=9;i<15;i++) set(14-i, 8, gb(fb,i));
+  for(let i=0;i<8;i++)  set(size-1-i, 8, gb(fb,i));
+  for(let i=8;i<15;i++) set(8, size-15+i, gb(fb,i));
+  set(8, size-8, 1);
+  if(ver>=7){
+    const vb = versionBitsOf(ver);
+    for(let i=0;i<18;i++){ const b = gb(vb,i), a = size-11 + i%3, c = Math.floor(i/3); set(a,c,b); set(c,a,b); }
+  }
+  let idx = 0;
+  for(let right=size-1; right>=1; right-=2){
+    if(right===6) right = 5;
+    for(let vert=0; vert<size; vert++) for(let j=0;j<2;j++){
+      const x = right - j;
+      const upward = ((right+1) & 2) === 0;
+      const y = upward ? size-1-vert : vert;
+      if(F[y][x]) continue;
+      let bit = idx < all.length*8 ? (all[idx>>3] >> (7-(idx&7))) & 1 : 0;
+      idx++;
+      if(maskBit(mask, x, y)) bit ^= 1;
+      M[y][x] = bit;
+    }
+  }
+  return {matrix:M, version:ver, size};
+}
+function renderQR(M, scale, quiet){
+  const size = M.length, dim = (size + 2*quiet) * scale;
+  const cv = document.createElement('canvas'); cv.width = dim; cv.height = dim;
+  const c = cv.getContext('2d');
+  c.fillStyle = '#fff'; c.fillRect(0,0,dim,dim);
+  c.fillStyle = '#000';
+  for(let y=0;y<size;y++) for(let x=0;x<size;x++) if(M[y][x]) c.fillRect((x+quiet)*scale, (y+quiet)*scale, scale, scale);
+  return cv;
+}
+const imageOf = cv => cv.getContext('2d').getImageData(0, 0, cv.width, cv.height);
+
+/* ================================ тесты ================================== */
+async function run(S){
+  /* --- batch_id --- */
+  section('batch_id — общий формат §A');
+  check('регексп совпадает с узловым (common/manifest.py:19)',
+        S.BATCH_ID_RE.source === '^\\d{8}T\\d{6}Z_[0-9a-z]{8}$', S.BATCH_ID_RE.source);
+  const fixed = S.newBatchId(new Date(Date.UTC(2026, 6, 10, 9, 15, 0)));
+  check('время берётся в UTC и форматируется как yyyymmddThhmmssZ',
+        fixed.startsWith('20260710T091500Z_'), fixed);
+  let allMatch = true, ids = new Set();
+  for(let i=0;i<200;i++){ const b = S.newBatchId(); if(!S.BATCH_ID_RE.test(b)) allMatch = false; ids.add(b); }
+  check('200 сгенерированных id проходят валидацию узла', allMatch);
+  check('в batch_id нет device_id и test_id (узел такой формат отвергнет)',
+        !/pl-|words_|motor_|draw_/.test(fixed), fixed);
+
+  /* --- сборка батча --- */
+  section('buildBatch — манифест, реестр, файлы');
+  const DEV = 'pl-deadbeef';
+  const audio = new Blob([new Uint8Array([1,2,3,4,5])], {type:'audio/webm'});
+  const wordRec = {
+    id:12, patientId:1, mode:'letters', createdAt: Date.UTC(2026,6,10,9,0,0),
+    letters:[
+      {letter:'К', durationMs:12345, wordCount:7, hasAudio:true,  audio, audioType:'audio/webm'},
+      {letter:'С', durationMs:9000,  wordCount:4, hasAudio:false, audio:null, audioType:''}
+    ]
+  };
+  const nodePatient  = {id:1, name:'A-014 — Иванов', nodePerson:{id:'01J0AAAA1', display_code:'A-014', full_name:'Иванов'}};
+  const localPatient = {id:2, name:'Петров П., №7'};
+
+  const batchId = S.newBatchId();
+  const w = await S.buildBatch({type:'word', record:wordRec, patient:nodePatient, deviceId:DEV,
+    batchId, createdAt: Date.UTC(2026,6,10,9,5,0), timepoint:2, condition:'post_load', operator:'Смирнова'});
+
+  check('manifest.machine = device_id', w.manifest.machine === DEV, w.manifest.machine);
+  check('manifest.source_state.test_id = words_12', w.manifest.source_state.test_id === 'words_12');
+  check('manifest.source = planshet и версия схемы 1',
+        w.manifest.source==='planshet' && w.manifest.manifest_version===1);
+  check('manifest.counts.records = 1', w.manifest.counts.records === 1);
+  check('manifest.created_at — время постановки в очередь, а не время теста',
+        w.manifest.created_at === '2026-07-10T09:05:00.000Z' && w.line.created_at === '2026-07-10T09:00:00.000Z');
+  check('registry/records.jsonl перечислен в manifest.files',
+        w.manifest.files.some(f=>f.path === 'registry/records.jsonl'));
+  check('аудио только у пунктов с записью', eq(w.line.files, ['files/audio_1.webm']));
+  check('uid = planshet:<device_id>:<test_id>', w.line.uid === 'planshet:pl-deadbeef:words_12', w.line.uid);
+  check('test = words (не word)', w.line.test === 'words');
+  check('timepoint/condition/operator доехали', w.line.timepoint===2 && w.line.condition==='post_load' && w.line.operator==='Смирнова');
+  check('patient_ref пациента узла', eq(w.line.patient_ref, {node_person_id:'01J0AAAA1', display_code:'A-014'}));
+  check('payload: пункт без аудио -> audio_file = null',
+        w.line.payload.items[1].audio_file === null && w.line.payload.items[0].audio_file === 'files/audio_1.webm');
+  check('payload: суммарные слова и секунды', w.line.payload.total_words === 11 && w.line.payload.items[0].duration_sec === 12.345);
+
+  const wLocal = await S.buildBatch({type:'word', record:wordRec, patient:localPatient, deviceId:DEV,
+    batchId:S.newBatchId(), createdAt:Date.now()});
+  check('patient_ref локального пациента', eq(wLocal.line.patient_ref, {local_name:'Петров П., №7'}));
+  check('timepoint/condition по умолчанию null',
+        wLocal.line.timepoint === null && wLocal.line.condition === null && wLocal.line.operator === null);
+
+  const motorRec = {id:3, patientId:1, rowsDone:2, rowsTarget:2, totalMs:5000,
+                    rowDurations:[2000,3000], events:[{type:'start',t:0},{type:'row_end',t:2000},{type:'end',t:5000}],
+                    createdAt:Date.now()};
+  const mb = await S.buildBatch({type:'motor', record:motorRec, patient:localPatient, deviceId:DEV,
+                                 batchId:S.newBatchId(), createdAt:Date.now()});
+  check('моторика: файлов данных нет, только реестр',
+        mb.files.length === 1 && mb.files[0].path === 'registry/records.jsonl' && eq(mb.line.files, []));
+  check('моторика: ряды в секундах', eq(mb.line.payload.row_durations_sec, [2,3]) && mb.line.payload.total_sec === 5);
+  check('моторика: test_id = motor_3', mb.manifest.source_state.test_id === 'motor_3');
+
+  const png = new Blob([new Uint8Array([137,80,78,71,13,10,26,10])], {type:'image/png'});
+  const drawRec = {id:7, patientId:1, template:'spiral', templateName:'Спираль',
+                   strokes:[{points:[{x:1.5,y:2.5,t:0,p:0.5},{x:3.5,y:4.5,t:20,p:0.6}]}],
+                   durationMs:4321, strokeCount:1, pointCount:2, canvasW:600, canvasH:400,
+                   image:png, imageType:'image/png', createdAt:Date.now()};
+  const db = await S.buildBatch({type:'draw', record:drawRec, patient:nodePatient, deviceId:DEV,
+                                 batchId:S.newBatchId(), createdAt:Date.now()});
+  check('рисунок: png + траектория', eq(db.line.files, ['files/drawing.png','files/trajectory.csv']));
+  check('рисунок: пути файлов продублированы в payload',
+        db.line.payload.image_file === 'files/drawing.png' && db.line.payload.trajectory_file === 'files/trajectory.csv');
+  const traj = await db.files.find(f=>f.path==='files/trajectory.csv').blob.text();
+  check('траектория без BOM (машинное чтение, не Excel)', traj.charCodeAt(0) !== 0xFEFF && traj.startsWith('"stroke"'));
+
+  /* --- реальные байты мультипарта --- */
+  section('Провод: то, что реально получит узел');
+  const form = new FormData();
+  form.append('manifest', new Blob([JSON.stringify(w.manifest)],{type:'application/json'}), 'manifest.json');
+  for(const f of w.files) form.append(f.path, f.blob, f.path.split('/').pop());
+  const {parts} = await wireParts(form);
+
+  const names = Object.keys(parts).filter(n=>n!=='manifest').sort();
+  const declared = w.manifest.files.map(f=>f.path).sort();
+  check('множество частей (кроме manifest) равно manifest.files — иначе узел вернёт 422',
+        eq(names, declared), names.join(',') + ' vs ' + declared.join(','));
+  check('часть manifest распарсилась и batch_id совпал',
+        JSON.parse(new TextDecoder().decode(parts['manifest'])).batch_id === batchId);
+
+  let shaOK = true, sizeOK = true;
+  for(const entry of w.manifest.files){
+    const body = parts[entry.path];
+    if(!body){ shaOK = false; break; }
+    if(await sha256(body) !== entry.sha256) shaOK = false;
+    if(body.length !== entry.size) sizeOK = false;
+  }
+  check('sha256 каждой части совпадает с манифестом', shaOK);
+  check('size каждой части совпадает с манифестом', sizeOK);
+
+  const jsonlText = new TextDecoder().decode(parts['registry/records.jsonl']);
+  check('records.jsonl — ровно одна строка с переводом строки в конце',
+        jsonlText.endsWith('\n') && jsonlText.trim().split('\n').length === 1);
+  let parsedLine = null;
+  try{ parsedLine = JSON.parse(jsonlText.trim()); }catch(e){}
+  check('records.jsonl разбирается как JSON', !!parsedLine && parsedLine.uid === w.line.uid);
+  check('аудио доехало байт-в-байт', parts['files/audio_1.webm'] && eq(Array.from(parts['files/audio_1.webm']), [1,2,3,4,5]));
+
+  /* --- миграция БД --- */
+  section('IndexedDB: апгрейд v1 -> v2 не теряет данные');
+  const dbName = 'trainers-db-upgrade-test';
+  await new Promise(res=>{ const r = indexedDB.deleteDatabase(dbName); r.onsuccess = r.onerror = r.onblocked = ()=>res(); });
+  await new Promise((res,rej)=>{                                  // старая схема v1
+    const r = indexedDB.open(dbName, 1);
+    r.onupgradeneeded = e=>{
+      const db = e.target.result;
+      db.createObjectStore('patients',{keyPath:'id',autoIncrement:true});
+      for(const s of ['word_tests','motor_tests','drawing_tests']){
+        const os = db.createObjectStore(s,{keyPath:'id',autoIncrement:true});
+        os.createIndex('patientId','patientId',{unique:false});
+      }
+    };
+    r.onsuccess = ()=>{
+      const db = r.result, t = db.transaction(['patients','word_tests'],'readwrite');
+      t.objectStore('patients').add({name:'Иванов И.', createdAt:1});
+      t.objectStore('word_tests').add({patientId:1, mode:'letters', letters:[], createdAt:1});
+      t.oncomplete = ()=>{ db.close(); res(); };
+      t.onerror = ()=>rej(t.error);
+    };
+    r.onerror = ()=>rej(r.error);
+  });
+  const upgraded = await new Promise((res,rej)=>{                  // тот же апгрейд, что в приложении
+    const r = indexedDB.open(dbName, S.DB_VER);
+    r.onupgradeneeded = e=>S.upgradeDB(e.target.result);
+    r.onsuccess = ()=>res(r.result);
+    r.onerror = ()=>rej(r.error);
+  });
+  const stores = Array.from(upgraded.objectStoreNames);
+  check('версия БД = 2', upgraded.version === 2 && S.DB_VER === 2);
+  check('новые сторы созданы', ['settings','node_persons','outbox'].every(s=>stores.includes(s)), stores.join(','));
+  check('старые сторы на месте', ['patients','word_tests','motor_tests','drawing_tests'].every(s=>stores.includes(s)));
+  const obIdx = Array.from(upgraded.transaction('outbox').objectStore('outbox').indexNames);
+  check('индексы outbox: status и уникальный testKey',
+        obIdx.includes('status') && obIdx.includes('testKey') &&
+        upgraded.transaction('outbox').objectStore('outbox').index('testKey').unique);
+  const survivors = await new Promise(res=>{
+    const r = upgraded.transaction('patients').objectStore('patients').getAll();
+    r.onsuccess = ()=>res(r.result);
+  });
+  check('данные пациента пережили апгрейд', survivors.length===1 && survivors[0].name==='Иванов И.');
+  const wordIdx = upgraded.transaction('word_tests').objectStore('word_tests').indexNames;
+  check('индекс patientId старых сторов не потерян', Array.from(wordIdx).includes('patientId'));
+  upgraded.close();
+  await new Promise(res=>{ const r = indexedDB.deleteDatabase(dbName); r.onsuccess = r.onerror = r.onblocked = ()=>res(); });
+
+  /* --- QR --- */
+  section('QR: таблицы, Рид-Соломон, полный круг кодирование -> декодирование');
+  const I = S.QR._internals;
+  check('общее число кодовых слов: v1=26, v7=196, v40=3706',
+        I.rawCodewords(1)===26 && I.rawCodewords(7)===196 && I.rawCodewords(40)===3706);
+  // независимая сверка с ёмкостями из стандарта ISO/IEC 18004
+  const capacity = (v,ecl)=> I.rawCodewords(v) - I.ECC_PER_BLOCK[ecl][v-1]*I.ECC_BLOCKS[ecl][v-1];
+  const known = [[1,'L',19],[1,'M',16],[1,'Q',13],[1,'H',9],[2,'L',34],[3,'L',55],
+                 [4,'M',64],[5,'Q',62],[7,'H',66],[10,'H',122],[40,'L',2956],[40,'H',1276]];
+  const capBad = known.filter(([v,e,n])=>capacity(v,e)!==n);
+  check('ёмкости данных совпадают со стандартом (проверка таблиц ECC)',
+        capBad.length===0, capBad.map(([v,e,n])=>`v${v}${e}: ${capacity(v,e)}!=${n}`).join(', '));
+  check('позиции alignment: v2=[6,18], v7=[6,22,38], v32 (особый шаг)',
+        eq(I.alignPositions(2),[6,18]) && eq(I.alignPositions(7),[6,22,38]) && I.alignPositions(32).length===6);
+
+  const payload = new Uint8Array(40).map((_,i)=>(i*7+11)&0xFF);
+  const ecTest = rsEncode(payload, 20);
+  const corrupted = Uint8Array.from([...payload, ...ecTest]);
+  for(const at of [0, 5, 17, 33, 44, 51, 55, 58, 59, 12]) corrupted[at] ^= 0xA5;   // 10 ошибок = ec/2
+  const fixed2 = I.rsDecode(corrupted, 20);
+  check('Рид-Соломон чинит ec/2 ошибок', !!fixed2 && eq(Array.from(fixed2), Array.from(payload)));
+  const tooBroken = Uint8Array.from([...payload, ...ecTest]);
+  for(let i=0;i<16;i++) tooBroken[i*3] ^= 0x5A;
+  check('Рид-Соломон честно сдаётся при переизбытке ошибок (не выдаёт мусор)',
+        I.rsDecode(tooBroken, 20) === null);
+
+  const pairing = JSON.stringify({url:'https://storage.lan', key:'k_'+'a'.repeat(24)});
+  let rtOK = true, rtBad = [];
+  for(const ecl of ['L','M','Q','H']) for(const mask of [0,1,2,3,4,5,6,7]){
+    const {matrix} = qrEncode(pairing, ecl, mask, I);
+    const text = S.QR.decode(imageOf(renderQR(matrix, 4, 4)));
+    if(text !== pairing){ rtOK = false; rtBad.push(ecl+'/'+mask); }
+  }
+  check('круг кодирование->декодирование: 4 уровня ECC x 8 масок', rtOK, rtBad.join(' '));
+
+  const long = JSON.stringify({url:'https://storage.lan', key:'k_'+'b'.repeat(120), note:'x'.repeat(120)});
+  const big = qrEncode(long, 'M', 3, I);
+  check('версия >= 7 (читается блок версии, а не только размер)', big.version >= 7, 'v'+big.version);
+  check('длинный QR (v'+big.version+') декодируется', S.QR.decode(imageOf(renderQR(big.matrix, 4, 4))) === long);
+
+  // на крупных версиях данные сами порождают ложные finder-паттерны 1:1:3:1:1 —
+  // проверяем, что тройка выбирается по геометрии, а не по «похожести размера»
+  const versions = [];
+  for(const len of [10, 60, 130, 260, 500, 900]){
+    const text = 'https://storage.lan/#' + 'z'.repeat(len);
+    const q = qrEncode(text, 'M', 4, I);
+    if(S.QR.decode(imageOf(renderQR(q.matrix, 4, 4))) !== text) versions.push('v'+q.version);
+  }
+  check('версии от 1 до 20+ декодируются (ложные finder-паттерны отсеиваются)',
+        versions.length === 0, 'сломались: ' + versions.join(', '));
+
+  const small = qrEncode(pairing, 'M', 2, I);
+  const src = renderQR(small.matrix, 6, 4);
+  const rot = document.createElement('canvas'); rot.width = rot.height = 520;
+  const rc = rot.getContext('2d');
+  rc.fillStyle = '#fff'; rc.fillRect(0,0,520,520);
+  rc.translate(260,260); rc.rotate(7*Math.PI/180); rc.scale(0.92,0.88);
+  rc.drawImage(src, -src.width/2, -src.height/2);
+  check('поворот 7° + неравномерный масштаб (перспектива/alignment)',
+        S.QR.decode(imageOf(rot)) === pairing);
+
+  const noise = renderQR(small.matrix, 6, 4);
+  const nctx = noise.getContext('2d');
+  nctx.fillStyle = 'rgba(0,0,0,0.35)';
+  for(let i=0;i<40;i++) nctx.fillRect((i*37)%noise.width, (i*53)%noise.height, 3, 3);
+  check('терпит грязь на изображении (коррекция ошибок работает)', S.QR.decode(imageOf(noise)) === pairing);
+  check('на изображении без QR возвращает null, а не исключение',
+        S.QR.decode(new ImageData(200,200)) === null);
+
+  section('Разбор QR подключения');
+  check('корректный JSON', eq(S.parsePairing('{"url":"https://storage.lan/","key":" abc "}'),
+                              {url:'https://storage.lan', key:'abc'}));
+  check('чужой QR отвергается', S.parsePairing('https://example.com') === null &&
+                                S.parsePairing('{"url":"x"}') === null);
+
+  const sum = document.getElementById('sum');
+  sum.textContent = failed ? `ПРОВАЛЕНО: ${failed}, пройдено: ${passed}` : `ВСЁ ЗЕЛЁНОЕ: ${passed} проверок`;
+  sum.style.background = failed ? '#fbe9e7' : '#e3f2e9';
+  window.__RESULT__ = {passed, failed};
+  console.log(failed ? `TESTS FAILED: ${failed}/${passed+failed}` : `TESTS OK: ${passed}`);
+}
+
+(async ()=>{
+  try{
+    const html = await (await fetch('../index.html')).text();
+    const code = html.match(/<script>([\s\S]*?)<\/script>/)[1];
+    const tag = document.createElement('script');
+    tag.textContent = code;
+    document.body.appendChild(tag);
+    if(!window.PlanshetSync) throw new Error('index.html не экспортировал PlanshetSync');
+    await run(window.PlanshetSync);
+  }catch(err){
+    console.error(err);
+    document.getElementById('sum').textContent = 'Не удалось запустить: ' + err.message;
+    document.getElementById('sum').style.background = '#fbe9e7';
+    window.__RESULT__ = {passed, failed: failed+1, error:String(err)};
+  }
+})();
+</script>
+</body>
+</html>

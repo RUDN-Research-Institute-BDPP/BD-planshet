@@ -1,5 +1,5 @@
 /* Простой офлайн-кэш: приложение работает без сети после первого открытия. */
-const CACHE = 'trainers-v1';
+const CACHE = 'trainers-v2';
 const ASSETS = ['./', './index.html', './manifest.webmanifest', './icon-192.png', './icon-512.png'];
 self.addEventListener('install', e=>{
   e.waitUntil(caches.open(CACHE).then(c=>c.addAll(ASSETS)).then(()=>self.skipWaiting()));
@@ -9,6 +9,9 @@ self.addEventListener('activate', e=>{
 });
 self.addEventListener('fetch', e=>{
   if(e.request.method!=='GET') return;
+  // Запросы к узлу хранилища идут мимо кэша: справочник пациентов должен быть
+  // свежим, а класть в кэш opaque-ответы чужого origin бессмысленно.
+  if(new URL(e.request.url).origin !== self.location.origin) return;
   e.respondWith(
     caches.match(e.request).then(hit=> hit || fetch(e.request).then(res=>{
       const copy=res.clone();
