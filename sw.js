@@ -1,6 +1,10 @@
 /* Простой офлайн-кэш: приложение работает без сети после первого открытия. */
-const CACHE = 'trainers-v1';
-const ASSETS = ['./', './index.html', './manifest.webmanifest', './icon-192.png', './icon-512.png'];
+const CACHE = 'trainers-v2';
+const ASSETS = [
+  './', './index.html', './manifest.webmanifest', './icon-192.png', './icon-512.png',
+  './assets/rey-osterrieth.png', './assets/taylor.png',
+  './assets/unknown-1.png', './assets/unknown-2.png', './assets/unknown-3.png'
+];
 self.addEventListener('install', e=>{
   e.waitUntil(caches.open(CACHE).then(c=>c.addAll(ASSETS)).then(()=>self.skipWaiting()));
 });
