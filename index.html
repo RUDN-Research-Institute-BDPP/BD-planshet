@@ -33,6 +33,7 @@
     overscroll-behavior:none;
   }
   .app{max-width:980px;margin:0 auto;min-height:100%;display:flex;flex-direction:column}
+  .app.draw-wide{max-width:1400px}
   header.top{
     position:sticky;top:0;z-index:20;background:var(--ink);color:#fff;
     padding:env(safe-area-inset-top) 16px 0;display:flex;align-items:center;gap:12px;
@@ -149,6 +150,36 @@
   .scan .scan-bar .grow{flex:1;font-size:14px}
   .scan .scan-bar .ghost{border:1px solid rgba(255,255,255,.25);background:transparent;color:#fff;
     height:38px;padding:0 12px;border-radius:10px;font-size:13px;font-weight:600;min-height:0}
+  .template-picker{display:grid;grid-template-columns:repeat(5,minmax(120px,1fr));gap:8px;margin:8px 0 14px}
+  .template-picker button{padding:8px;min-height:112px;display:flex;flex-direction:column;gap:6px;align-items:center;justify-content:center;font-size:12px}
+  .template-picker button.on{background:var(--accent-bg);border-color:var(--accent);color:var(--accent-d)}
+  .template-picker img{width:100%;height:76px;object-fit:contain;display:block;background:#fff;border-radius:7px}
+  .template-preview{width:100%;height:330px;object-fit:contain;display:block;background:#fff;border:1px solid var(--line);border-radius:var(--radius)}
+  .drawing-layout{display:grid;grid-template-columns:minmax(230px,30%) minmax(0,1fr);gap:16px;align-items:start}
+  .drawing-reference{position:sticky;top:74px;padding:12px;text-align:center}
+  .drawing-reference img{width:100%;max-height:42vh;object-fit:contain;display:block;background:#fff;border-radius:10px}
+  .drawing-reference .name{font-size:13px;font-weight:700;margin-top:8px}
+  .drawing-workspace{min-width:0;display:flex;flex-direction:column;gap:12px}
+  canvas.drawing-surface{height:72vh;min-height:520px}
+  .time-legend{margin-top:12px}
+  .time-legend .scale{height:14px;border-radius:999px;background:linear-gradient(90deg,hsl(210,72%,46%) 0%,hsl(162.5,72%,46%) 25%,hsl(115,72%,46%) 50%,hsl(67.5,72%,46%) 75%,hsl(20,72%,46%) 100%)}
+  .time-legend .ticks{display:flex;justify-content:space-between;margin-top:5px;font:12px var(--mono);color:var(--muted)}
+  .result-drawing{display:grid;grid-template-columns:minmax(0,2fr) minmax(190px,1fr);gap:16px;align-items:start}
+  .result-drawing img{width:100%;object-fit:contain;background:#fff;border:1px solid var(--line);border-radius:12px}
+  .manual-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+  @media(max-width:900px){
+    .template-picker{grid-template-columns:repeat(3,minmax(100px,1fr))}
+    .drawing-layout{grid-template-columns:minmax(180px,32%) minmax(0,1fr);gap:10px}
+    canvas.drawing-surface{min-height:440px}
+  }
+  @media(max-width:620px){
+    .template-picker{grid-template-columns:repeat(2,minmax(100px,1fr))}
+    .drawing-layout,.result-drawing{grid-template-columns:1fr}
+    .drawing-reference{position:static}
+    .drawing-reference img{max-height:30vh}
+    canvas.drawing-surface{height:60vh;min-height:380px}
+    .manual-grid{grid-template-columns:1fr}
+  }
 </style>
 </head>
 <body>
@@ -345,6 +376,7 @@ async function render(){
   runLeaveHook();
   const h = location.hash || '#/';
   const parts = h.replace(/^#\//,'').split('/'); // ['', ...] or ['patient','3']
+  $('.app').classList.toggle('draw-wide', parts[0]==='test' && parts[1]==='draw');
   try{
     if(h==='#/' || h===''){ return renderHome(); }
     if(parts[0]==='settings'){ return renderSettings(); }
@@ -453,9 +485,9 @@ async function renderPatient(pid){
 
     <h3>Выбрать тест</h3>
     <div class="tiles">
-      <button class="tile card" id="tWord"><span class="ti">🗣️</span><span class="tt">Упражнение на слова</span><span class="td">Аудиозапись + число слов на букву</span></button>
-      <button class="tile card" id="tMotor"><span class="ti">🧩</span><span class="tt">Мелкая моторика</span><span class="td">Умный секундомер по рядам</span></button>
-      <button class="tile card" id="tDraw"><span class="ti">✍️</span><span class="tt">Рисовалка</span><span class="td">Обводка стилусом, градиент по времени</span></button>
+      <button class="tile card" id="tWord"><span class="ti">🗣️</span><span class="tt">Упражнение на слова</span><span class="td">Запись с микрофоном или ввод готового результата</span></button>
+      <button class="tile card" id="tMotor"><span class="ti">🧩</span><span class="tt">Мелкая моторика</span><span class="td">Секундомер по рядам или ввод готовых времён</span></button>
+      <button class="tile card" id="tDraw"><span class="ti">✍️</span><span class="tt">Рисовалка</span><span class="td">Копирование фигур стилусом, цвет по времени</span></button>
     </div>
 
     <div class="row between" style="margin-top:24px">
@@ -529,7 +561,7 @@ async function renderTest(type, pid){
 /* ===================== ТЕСТ 1: УПРАЖНЕНИЕ НА СЛОВА ====================== */
 function wordTest(p){
   setHeader('Слова · '+p.name, '#/patient/'+p.id);
-  let phase='setup'; // setup -> recording -> count
+  let phase='setup'; // setup -> recording -> count | manual
   let prompt='';     // текущая буква или категория (сырой ввод)
   let startTs=0, rafId=0, timerEl=null;
   let stream=null, recorder=null, chunks=[], audioBlob=null, durationMs=0;
@@ -559,12 +591,14 @@ function wordTest(p){
           <label class="field"><span>${session.mode==='letters'?'Буква для теста':'Категория для теста'}</span>
             <input type="text" id="prompt" ${session.mode==='letters'?'maxlength="3"':'maxlength="40"'} placeholder="${session.mode==='letters'?'например: К':'например: Животные'}" autocomplete="off" style="font-size:${session.mode==='letters'?'28px':'22px'};text-align:center;${session.mode==='letters'?'text-transform:uppercase':''}"></label>
           <button class="btn-go btn-block btn-lg" id="startBtn">▶ Старт (запись)</button>
+          <button class="btn-ghost btn-block" id="manualBtn" style="margin-top:10px">Внести готовый результат</button>
           <div class="small muted" style="margin-top:10px">Браузер попросит доступ к микрофону при первом запуске.</div>
         </div>`;
       if(!locked){ $('#modeSeg').querySelectorAll('button').forEach(b=>b.onclick=()=>{ session.mode=b.dataset.m; prompt=''; paint(); }); }
       const inp=$('#prompt'); inp.focus();
       inp.oninput=()=>{ prompt=inp.value; };
       $('#startBtn').onclick=start;
+      $('#manualBtn').onclick=()=>{ if(!prompt.trim()){ toast('Введите '+unitAcc()); return; } phase='manual'; paint(); };
     }
     if(phase==='recording'){
       view.innerHTML = `
@@ -592,6 +626,22 @@ function wordTest(p){
         </div>`;
       const wc=$('#wc'); wc.focus();
       $('#saveBtn').onclick=()=>save(wc.value);
+    }
+    if(phase==='manual'){
+      view.innerHTML = `
+        <h2>${titleFor(fmtPrompt(prompt))}</h2>
+        <div class="hint" style="margin-bottom:16px">Введите уже полученный результат. Аудиозапись и время для него не создаются.</div>
+        <div class="card pad">
+          <label class="field"><span>Число названных слов</span>
+            <input type="number" id="manualWc" inputmode="numeric" min="0" step="1" placeholder="0" style="font-size:28px;text-align:center"></label>
+          <label class="field"><span>Сами слова — необязательно</span>
+            <textarea id="manualWords" rows="5" placeholder="Каждое слово с новой строки или через запятую"></textarea></label>
+          <button class="btn-accent btn-block btn-lg" id="manualSave">Сохранить готовый результат</button>
+          <button class="btn-ghost btn-block" id="manualBack" style="margin-top:10px">Назад</button>
+        </div>`;
+      $('#manualWc').focus();
+      $('#manualSave').onclick=()=>save($('#manualWc').value, $('#manualWords').value, true);
+      $('#manualBack').onclick=()=>{ phase='setup'; paint(); };
     }
   }
   function tick(){
@@ -627,11 +677,13 @@ function wordTest(p){
       audioBlob=null; phase='count'; paint();
     }
   }
-  async function save(val){
+  async function save(val, wordsText='', manual=false){
     const wordCount = Math.max(0, parseInt(val||'0',10)||0);
     const promptVal = fmtPrompt(prompt);
+    const namedWords = String(wordsText||'').split(/[\n,;]+/).map(x=>x.trim()).filter(Boolean);
     session.letters.push({
-      letter:promptVal, mode:session.mode, durationMs:Math.round(durationMs), wordCount,
+      letter:promptVal, mode:session.mode, durationMs:manual?null:Math.round(durationMs), wordCount,
+      words:namedWords, entryMethod:manual?'manual':'recorded',
       hasAudio:!!audioBlob, audio:audioBlob||null, audioType:audioBlob?audioBlob.type:''
     });
     session.updatedAt=Date.now();
@@ -648,7 +700,7 @@ function wordTest(p){
     view.innerHTML = `
       <h2>Записано ✓</h2>
       <div class="card pad">
-        <div class="small muted" style="margin-bottom:14px">В этой записи (${session.mode==='letters'?'по буквам':'по категориям'}): <b>${escapeHtml(listStr)}</b> · всего слов: ${totalWords}.<br>Последняя — «${escapeHtml(promptVal)}»: ${wordCount} слов, ${fmtSec(durationMs)} c${audioBlob?', аудио записано':''}.</div>
+        <div class="small muted" style="margin-bottom:14px">В этой записи (${session.mode==='letters'?'по буквам':'по категориям'}): <b>${escapeHtml(listStr)}</b> · всего слов: ${totalWords}.<br>Последняя — «${escapeHtml(promptVal)}»: ${wordCount} слов${manual?', внесено вручную':`, ${fmtSec(durationMs)} c${audioBlob?', аудио записано':''}`}${namedWords.length?`.<br>Слова: ${escapeHtml(namedWords.join(', '))}`:''}.</div>
         <button class="btn-accent btn-block btn-lg" id="more">+ Ещё одна ${unit()} (в эту же запись)</button>
         <button class="btn-ghost btn-block" id="fin" style="margin-top:10px">Закончить упражнение</button>
       </div>`;
@@ -676,9 +728,11 @@ function motorTest(p){
           <label class="field"><span>Число рядов</span>
             <input type="number" id="rows" min="1" max="30" step="1" value="5" style="font-size:24px;text-align:center"></label>
           <button class="btn-go btn-block btn-xl" id="startBtn">▶ Старт</button>
+          <button class="btn-ghost btn-block" id="manualBtn" style="margin-top:10px">Внести готовые времена</button>
         </div>`;
-      $('#rows').oninput=e=>{ rowsTarget=Math.max(1,parseInt(e.target.value||'5',10)||5); };
+      $('#rows').oninput=e=>{ rowsTarget=Math.min(30,Math.max(1,parseInt(e.target.value||'5',10)||5)); };
       $('#startBtn').onclick=start;
+      $('#manualBtn').onclick=()=>{ phase='manual'; paint(); };
     } else if(phase==='run'){
       view.innerHTML = `
         <h2>Идёт упражнение</h2>
@@ -693,6 +747,20 @@ function motorTest(p){
       swEl=$('#sw'); subEl=$('#sub');
       $('#actBtn').onclick=action;
       updateButton(); updateLog(); tick();
+    } else if(phase==='manual'){
+      view.innerHTML = `
+        <h2>Готовые времена</h2>
+        <div class="hint" style="margin-bottom:16px">Введите длительность каждого ряда в секундах. Можно использовать точку или запятую.</div>
+        <div class="card pad">
+          <div class="manual-grid">
+            ${Array.from({length:rowsTarget},(_,i)=>`<label class="field"><span>Ряд ${i+1}, секунд</span><input type="text" class="manualTime" inputmode="decimal" placeholder="0,00"></label>`).join('')}
+          </div>
+          <button class="btn-accent btn-block btn-lg" id="manualSave">Сохранить готовые времена</button>
+          <button class="btn-ghost btn-block" id="manualBack" style="margin-top:10px">Назад</button>
+        </div>`;
+      $('.manualTime').focus();
+      $('#manualSave').onclick=saveManual;
+      $('#manualBack').onclick=()=>{ phase='setup'; paint(); };
     }
   }
   function tick(){
@@ -726,7 +794,7 @@ function motorTest(p){
     const rec = {
       patientId:p.id, rowsTarget, rowsDone:m.rows.length,
       events, totalMs:m.total, rowDurations:m.rows,
-      startedAt:Date.now(), createdAt:Date.now()
+      entryMethod:'timer', startedAt:Date.now(), createdAt:Date.now()
     };
     rec.id = await idbAdd('motor_tests', rec);
     enqueueTest('motor', rec, p);
@@ -738,6 +806,40 @@ function motorTest(p){
         <button class="btn-ghost btn-block" id="fin" style="margin-top:10px">К пациенту</button>
       </div>`;
     $('#again').onclick=()=>{ phase='setup'; events=[]; paint(); };
+    $('#fin').onclick=()=>go('#/patient/'+p.id);
+  }
+  function parseSeconds(value){
+    const s=String(value||'').trim().replace(',','.');
+    if(!s) return NaN;
+    if(s.includes(':')){
+      const parts=s.split(':').map(Number); if(parts.some(x=>!Number.isFinite(x))) return NaN;
+      return parts.reduce((acc,x)=>acc*60+x,0);
+    }
+    return Number(s);
+  }
+  async function saveManual(){
+    const values=Array.from(document.querySelectorAll('.manualTime')).map(x=>parseSeconds(x.value));
+    if(values.some(x=>!Number.isFinite(x)||x<0)){ toast('Проверьте времена всех рядов'); return; }
+    const durations=values.map(x=>Math.round(x*1000));
+    let cumulative=0; const manualEvents=[{type:'start',t:0}];
+    durations.forEach((d,i)=>{ cumulative+=d; manualEvents.push({type:i===durations.length-1?'end':'row_end',t:cumulative}); });
+    const m={rows:durations,total:cumulative};
+    const rec = {
+      patientId:p.id, rowsTarget, rowsDone:durations.length,
+      events:manualEvents, totalMs:m.total, rowDurations:m.rows,
+      entryMethod:'manual', startedAt:Date.now(), createdAt:Date.now()
+    };
+    rec.id = await idbAdd('motor_tests', rec);
+    enqueueTest('motor', rec, p);
+    toast('Готовые времена сохранены');
+    view.innerHTML = `
+      <h2>Готово ✓</h2>
+      <div class="card pad">${motorTable(m)}
+        <div class="small muted" style="margin-top:8px">Результат внесён вручную.</div>
+        <button class="btn-accent btn-block btn-lg" id="again" style="margin-top:16px">Ещё прохождение</button>
+        <button class="btn-ghost btn-block" id="fin" style="margin-top:10px">К пациенту</button>
+      </div>`;
+    $('#again').onclick=()=>{ phase='setup'; paint(); };
     $('#fin').onclick=()=>go('#/patient/'+p.id);
   }
   paint();
@@ -757,19 +859,27 @@ function motorTable(m){
 
 /* ===================== ТЕСТ 3: РИСОВАЛКА =============================== */
 const TEMPLATES = {
-  spiral:{name:'Спираль', draw:(ctx,w,h)=>{ const cx=w/2,cy=h/2; ctx.beginPath();
-    for(let a=0;a<Math.PI*2*5;a+=0.05){ const r=a*Math.min(w,h)/(Math.PI*2*5)/2.2; const x=cx+r*Math.cos(a),y=cy+r*Math.sin(a); a===0?ctx.moveTo(x,y):ctx.lineTo(x,y);} ctx.stroke(); }},
-  star:{name:'Звезда', draw:(ctx,w,h)=>{ const cx=w/2,cy=h/2,R=Math.min(w,h)*0.4,r=R*0.45; ctx.beginPath();
-    for(let i=0;i<=10;i++){ const ang=-Math.PI/2+i*Math.PI/5; const rad=i%2?r:R; const x=cx+rad*Math.cos(ang),y=cy+rad*Math.sin(ang); i===0?ctx.moveTo(x,y):ctx.lineTo(x,y);} ctx.closePath(); ctx.stroke(); }},
-  wave:{name:'Волна', draw:(ctx,w,h)=>{ ctx.beginPath(); const A=h*0.22,mid=h/2; for(let x=w*0.08;x<=w*0.92;x+=2){ const y=mid+A*Math.sin((x-w*0.08)/ (w*0.84)*Math.PI*4); x===Math.floor(w*0.08)?ctx.moveTo(x,y):ctx.lineTo(x,y);} ctx.stroke(); }},
-  square:{name:'Квадрат', draw:(ctx,w,h)=>{ const s=Math.min(w,h)*0.6,x=(w-s)/2,y=(h-s)/2; ctx.strokeRect(x,y,s,s); }},
+  rey:{name:'Тест Рея—Остеррица', src:'assets/rey-osterrieth.png'},
+  taylor:{name:'Фигура Тейлора', src:'assets/taylor.png'},
+  unknown1:{name:'Неизвестная фигура 1', src:'assets/unknown-1.png'},
+  unknown2:{name:'Неизвестная фигура 2', src:'assets/unknown-2.png'},
+  unknown3:{name:'Неизвестная фигура 3', src:'assets/unknown-3.png'}
 };
+function maxStrokeMs(strokes){
+  let max=0; for(const s of (strokes||[])) for(const pt of (s.points||[])) if(pt.t>max) max=pt.t;
+  return max;
+}
+function timeLegend(ms){
+  const total=Math.max(0,Number(ms)||0);
+  const labels=[0,.25,.5,.75,1].map(f=>(total*f/1000).toFixed(1)+' c');
+  return `<div class="time-legend"><div class="small muted" style="margin-bottom:6px">Цвет линии по времени</div><div class="scale"></div><div class="ticks">${labels.map(x=>`<span>${x}</span>`).join('')}</div></div>`;
+}
 function drawTest(p){
   setHeader('Рисунок · '+p.name, '#/patient/'+p.id);
   let phase='setup';
-  let tplKey='spiral', stylusOnly=true;
+  let tplKey='rey', stylusOnly=true;
   let customImg=null, customDataURL='';   // загруженная своя картинка-образец
-  let canvas,ctx,bg,bgctx,dpr=1,W=0,H=0;
+  let canvas,ctx,dpr=1,W=0,H=0;
   let strokes=[], cur=null, drawing=false, activeId=null, startTs=0;
 
   function paint(){
@@ -779,19 +889,17 @@ function drawTest(p){
         <div class="hint" style="margin-bottom:14px">Покажите образец пациенту. По «Начать» включается сцена рисования. Рисовать нужно <b>стилусом</b> — ладонь можно класть на экран (см. режим ниже).</div>
         <div class="card pad">
           <span class="small" style="font-weight:600;color:var(--ink-soft)">Образец</span>
-          <div class="seg" id="seg" style="margin:8px 0 10px">
-            ${Object.entries(TEMPLATES).map(([k,v])=>`<button data-k="${k}" class="${k===tplKey?'on':''}">${v.name}</button>`).join('')}
-            ${customImg?`<button data-k="custom" class="${tplKey==='custom'?'on':''}">Своя</button>`:''}
+          <div class="template-picker" id="seg">
+            ${Object.entries(TEMPLATES).map(([k,v])=>`<button data-k="${k}" class="${k===tplKey?'on':''}"><img src="${v.src}" alt=""><span>${v.name}</span></button>`).join('')}
+            ${customImg?`<button data-k="custom" class="${tplKey==='custom'?'on':''}"><img src="${customDataURL}" alt=""><span>Своя</span></button>`:''}
           </div>
           <input type="file" id="imgFile" accept="image/*" hidden>
           <button class="btn-ghost small btn-block" id="uploadBtn" style="margin-bottom:14px">＋ Загрузить свою картинку</button>
-          <canvas id="preview" class="draw" style="height:300px"></canvas>
+          <img class="template-preview" src="${tplKey==='custom'?customDataURL:TEMPLATES[tplKey].src}" alt="${escapeHtml(tplKey==='custom'?'Своя картинка':TEMPLATES[tplKey].name)}">
           <label class="switch" style="margin-top:14px">
             <input type="checkbox" id="stylus" ${stylusOnly?'checked':''}> Только стилус (ладонь не рисует)</label>
           <button class="btn-go btn-block btn-xl" id="startBtn" style="margin-top:14px">▶ Начать</button>
         </div>`;
-      const pv=$('#preview'); sizeCanvas(pv); const c=pv.getContext('2d');
-      drawTemplate(c, pv._w, pv._h);
       $('#seg').querySelectorAll('button').forEach(b=>b.onclick=()=>{ tplKey=b.dataset.k; paint(); });
       $('#stylus').onchange=e=>stylusOnly=e.target.checked;
       $('#uploadBtn').onclick=()=>$('#imgFile').click();
@@ -808,28 +916,31 @@ function drawTest(p){
     } else if(phase==='draw'){
       view.innerHTML = `
         <h2>Рисует пациент</h2>
-        <div class="stage">
-          <div class="toolbar">
-            <span class="badge">Время <span id="t" style="font-family:var(--mono)">0.0 c</span></span>
-            <span class="badge">Штрихов <span id="ns">0</span></span>
-            <span class="grow"></span>
-            <button class="btn-ghost small" id="undo">↶ Отменить штрих</button>
-            <button class="btn-ghost small" id="clear">Очистить</button>
+        <div class="drawing-layout">
+          <aside class="card drawing-reference">
+            <img src="${tplKey==='custom'?customDataURL:TEMPLATES[tplKey].src}" alt="Образец">
+            <div class="name">${escapeHtml(tplKey==='custom'?'Своя картинка':TEMPLATES[tplKey].name)}</div>
+          </aside>
+          <div class="drawing-workspace">
+            <div class="toolbar">
+              <span class="badge">Время <span id="t" style="font-family:var(--mono)">0.0 c</span></span>
+              <span class="badge">Штрихов <span id="ns">0</span></span>
+              <span class="grow"></span>
+              <button class="btn-ghost small" id="undo">↶ Отменить штрих</button>
+              <button class="btn-ghost small" id="clear">Очистить</button>
+            </div>
+            <canvas id="cv" class="draw drawing-surface"></canvas>
+            <button class="btn-accent btn-block btn-xl" id="done">Завершить и сохранить</button>
           </div>
-          <div style="position:relative">
-            <canvas id="bg" style="position:absolute;inset:0;width:100%;pointer-events:none"></canvas>
-            <canvas id="cv" class="draw" style="height:62vh;position:relative"></canvas>
-          </div>
-          <button class="btn-accent btn-block btn-xl" id="done">Завершить и сохранить</button>
         </div>`;
-      bg=$('#bg'); canvas=$('#cv');
-      sizeCanvas(canvas); sizeCanvas(bg);
-      ctx=canvas.getContext('2d'); bgctx=bg.getContext('2d');
+      canvas=$('#cv');
+      sizeCanvas(canvas);
+      ctx=canvas.getContext('2d');
       W=canvas._w; H=canvas._h; dpr=canvas._dpr;
-      drawTemplate(bgctx, W, H, true); // бледный образец на фоне
       redrawLive();
+      startTs=performance.now();
       bindPointer();
-      startTs=performance.now(); tickT();
+      tickT();
       $('#undo').onclick=()=>{ strokes.pop(); redrawLive(); updMeta(); };
       $('#clear').onclick=()=>{ strokes=[]; redrawLive(); updMeta(); };
       $('#done').onclick=finish;
@@ -841,24 +952,11 @@ function drawTest(p){
     cv.width=Math.round(rect.width*d); cv.height=Math.round(rect.height*d);
     const c=cv.getContext('2d'); c.setTransform(d,0,0,d,0,0);
   }
-  function drawImgContain(c,img,w,h,alpha){
-    const iw=img.naturalWidth||img.width, ih=img.naturalHeight||img.height; if(!iw||!ih) return;
-    const s=Math.min(w/iw,h/ih), dw=iw*s, dh=ih*s, dx=(w-dw)/2, dy=(h-dh)/2;
-    c.save(); c.globalAlpha=alpha; c.drawImage(img,dx,dy,dw,dh); c.restore();
-  }
-  function drawTemplate(c,w,h,faint){
-    c.clearRect(0,0,w,h);
-    if(tplKey==='custom'){ if(customImg) drawImgContain(c,customImg,w,h, faint?0.28:0.65); return; }
-    c.lineWidth=2; c.strokeStyle = faint ? 'rgba(31,122,140,.18)' : 'rgba(60,77,90,.5)';
-    c.lineCap='round'; c.lineJoin='round';
-    TEMPLATES[tplKey].draw(c,w,h);
-  }
   function startScene(){ strokes=[]; phase='draw'; paint(); }
   function tickT(){ const el=$('#t'); if(!el) return; el.textContent=((performance.now()-startTs)/1000).toFixed(1)+' c'; requestAnimationFrame(tickT); }
   function updMeta(){ const n=$('#ns'); if(n) n.textContent=strokes.length; }
 
   function allowed(e){ if(!stylusOnly) return true; return e.pointerType==='pen'||e.pointerType==='mouse'; }
-  function pos(e){ const r=canvas.getBoundingClientRect(); return {x:e.clientX-r.left, y:e.clientY-r.top, p:(e.pressure>0?e.pressure:0.5)}; }
   function bindPointer(){
     canvas.addEventListener('pointerdown', e=>{
       if(!allowed(e)) return;
@@ -894,14 +992,14 @@ function drawTest(p){
       ctx.strokeStyle='#39505d'; ctx.lineCap='round'; ctx.lineJoin='round'; ctx.lineWidth=1.5+2.5*pts[i].p;
       ctx.beginPath(); ctx.moveTo(pts[i-1].x,pts[i-1].y); ctx.lineTo(pts[i].x,pts[i].y); ctx.stroke(); } } }
 
-  function renderGradient(targetCtx, w, h, white){
+  function renderGradient(targetCtx, w, h, white, maxMs){
     // окрашивание по времени: ранние — синие, поздние — оранжево-красные
-    let maxT=1; for(const s of strokes) for(const pt of s.points) if(pt.t>maxT) maxT=pt.t;
+    const maxT=Math.max(1,maxMs||maxStrokeMs(strokes));
     targetCtx.clearRect(0,0,w,h);
     if(white){ targetCtx.fillStyle='#fff'; targetCtx.fillRect(0,0,w,h); }
     targetCtx.lineCap='round'; targetCtx.lineJoin='round';
     for(const s of strokes){ const pts=s.points; for(let i=1;i<pts.length;i++){
-      const f=pts[i].t/maxT; const hue=210-190*f; // 210(син)->20(красн)
+      const f=Math.min(1,pts[i].t/maxT); const hue=210-190*f; // 210(син)->20(красн)
       targetCtx.strokeStyle=`hsl(${hue},72%,46%)`; targetCtx.lineWidth=1.6+2.6*pts[i].p;
       targetCtx.beginPath(); targetCtx.moveTo(pts[i-1].x,pts[i-1].y); targetCtx.lineTo(pts[i].x,pts[i].y); targetCtx.stroke(); } }
   }
@@ -910,17 +1008,17 @@ function drawTest(p){
     const pointCount=strokes.reduce((a,s)=>a+s.points.length,0);
     if(pointCount<2){ toast('Нарисуйте фигуру стилусом'); return; }
     // отрисовать градиент на видимом холсте (обратная связь)
-    renderGradient(ctx, W, H, false);
+    renderGradient(ctx, W, H, false, durationMs);
     // отрисовать на offscreen с белым фоном -> PNG
     const off=document.createElement('canvas'); off.width=Math.round(W*dpr); off.height=Math.round(H*dpr);
     const octx=off.getContext('2d'); octx.setTransform(dpr,0,0,dpr,0,0);
-    renderGradient(octx, W, H, true);
+    renderGradient(octx, W, H, true, durationMs);
     const imgBlob=await new Promise(res=>off.toBlob(res,'image/png'));
     const tName = tplKey==='custom' ? 'Своя картинка' : TEMPLATES[tplKey].name;
     const rec = {
       patientId:p.id, template:tplKey, templateName:tName,
       templateImage: tplKey==='custom' ? customDataURL : null,
-      strokes, durationMs, strokeCount:strokes.length, pointCount,
+      strokes, durationMs, colorScaleMs:durationMs, strokeCount:strokes.length, pointCount,
       canvasW:W, canvasH:H, image:imgBlob, imageType:'image/png',
       startedAt:Date.now(), createdAt:Date.now()
     };
@@ -932,7 +1030,7 @@ function drawTest(p){
       <div class="card pad">
         <div class="small muted" style="margin-bottom:12px">Образец: ${escapeHtml(tName)} · ${strokes.length} штрихов · ${pointCount} точек · ${fmtSec(durationMs)} c</div>
         <img style="width:100%;border:1px solid var(--line);border-radius:12px" src="${URL.createObjectURL(imgBlob)}">
-        <div class="small muted" style="margin-top:8px">Цвет показывает порядок во времени: синий — начало, красный — конец.</div>
+        ${timeLegend(durationMs)}
         <button class="btn-accent btn-block btn-lg" id="again" style="margin-top:14px">Ещё рисунок</button>
         <button class="btn-ghost btn-block" id="fin" style="margin-top:10px">К пациенту</button>
       </div>`;
@@ -956,17 +1054,20 @@ async function renderResult(type, id){
     const rows = L.map((x,i)=>`<tr>
         <td>${i+1}. ${isCat?escapeHtml(x.letter):'«'+escapeHtml(x.letter)+'»'}</td>
         <td class="num">${x.wordCount}</td>
-        <td class="num">${fmtSec(x.durationMs)} c</td>
+        <td>${escapeHtml(Array.isArray(x.words)?x.words.join(', '):(x.words||''))||'<span class="muted small">не указаны</span>'}</td>
+        <td class="num">${Number.isFinite(x.durationMs)?fmtSec(x.durationMs)+' c':'—'}</td>
         <td>${x.audio?`<audio controls style="width:160px;max-width:46vw" src="${URL.createObjectURL(x.audio)}"></audio>`:'<span class="muted small">нет</span>'}</td>
       </tr>`).join('');
     inner = `<div class="small muted" style="margin-bottom:10px">Режим: <b>${isCat?'по категориям':'по буквам'}</b> · пунктов: ${L.length} · всего слов: ${tw} · ${fmtDate(r.createdAt)}</div>
-      <table class="data"><thead><tr><th>${isCat?'Категория':'Буква'}</th><th>Слов</th><th>Время</th><th>Аудио</th></tr></thead><tbody>${rows}</tbody></table>`;
+      <div style="overflow:auto"><table class="data"><thead><tr><th>${isCat?'Категория':'Буква'}</th><th>Слов</th><th>Названные слова</th><th>Время</th><th>Аудио</th></tr></thead><tbody>${rows}</tbody></table></div>`;
   } else if(type==='motor'){
     const m={rows:r.rowDurations||[],total:r.totalMs};
-    inner = motorTable(m)+`<div class="small muted" style="margin-top:8px">Рядов выполнено: ${r.rowsDone} из ${r.rowsTarget}. Дата: ${fmtDate(r.createdAt)}.</div>`;
+    inner = motorTable(m)+`<div class="small muted" style="margin-top:8px">Рядов выполнено: ${r.rowsDone} из ${r.rowsTarget}. ${r.entryMethod==='manual'?'Внесено вручную. ':''}Дата: ${fmtDate(r.createdAt)}.</div>`;
   } else {
-    inner = `<img style="width:100%;border:1px solid var(--line);border-radius:12px" src="${URL.createObjectURL(r.image)}">
-      ${r.templateImage?`<div class="small muted" style="margin:10px 0 4px">Показанный образец:</div><img style="width:100%;border:1px dashed var(--line);border-radius:12px;opacity:.9" src="${r.templateImage}">`:''}
+    const templateSrc=r.templateImage||(TEMPLATES[r.template]&&TEMPLATES[r.template].src)||'';
+    const scaleMs=r.colorScaleMs||maxStrokeMs(r.strokes)||r.durationMs;
+    inner = `<div class="result-drawing"><div><div class="small muted" style="margin-bottom:6px">Рисунок пациента</div><img src="${URL.createObjectURL(r.image)}">${timeLegend(scaleMs)}</div>
+      ${templateSrc?`<div><div class="small muted" style="margin-bottom:6px">Показанный образец</div><img src="${templateSrc}"></div>`:''}</div>
       <table class="data" style="margin-top:12px"><tbody>
       <tr><th>Образец</th><td>${escapeHtml(r.templateName||r.template||'')}</td></tr>
       <tr><th>Штрихов</th><td class="num">${r.strokeCount}</td></tr>
@@ -992,13 +1093,14 @@ function trajRows(r){
   return rows;
 }
 function wordRows(list, withPatient){
-  const head = (withPatient?['patient_id','patient']:[]).concat(['test_id','mode','item_index','date','prompt','word_count','duration_sec','has_audio','audio_file']);
+  const head = (withPatient?['patient_id','patient']:[]).concat(['test_id','mode','item_index','date','prompt','word_count','named_words','entry_method','duration_sec','has_audio','audio_file']);
   const rows=[head];
   for(const r of list){
     const L=wordLetters(r); const mode=r.mode||'letters';
     L.forEach((x,i)=>{
       const af = x.hasAudio ? `word_audio/${r.id}_${safeName(r._pname)}_${i+1}_${safeName(x.letter)}.${audioExt(x.audioType)}` : '';
-      rows.push((withPatient?[r.patientId, r._pname]:[]).concat([r.id, (x.mode||mode)==='categories'?'категории':'буквы', i+1, fmtDate(r.createdAt), x.letter, x.wordCount, fmtSec(x.durationMs), x.hasAudio?'1':'0', af]));
+      const words=Array.isArray(x.words)?x.words.join('; '):(x.words||'');
+      rows.push((withPatient?[r.patientId, r._pname]:[]).concat([r.id, (x.mode||mode)==='categories'?'категории':'буквы', i+1, fmtDate(r.createdAt), x.letter, x.wordCount, words, x.entryMethod||'recorded', Number.isFinite(x.durationMs)?fmtSec(x.durationMs):'', x.hasAudio?'1':'0', af]));
     });
   }
   return rows;
@@ -1010,11 +1112,11 @@ function wordAudioFiles(r){
 }
 function motorRows(list, withPatient){
   let maxRows=0; for(const r of list) maxRows=Math.max(maxRows, (r.rowDurations||[]).length);
-  const head=(withPatient?['patient_id','patient']:[]).concat(['test_id','date','rows_done','rows_target','total_sec']);
+  const head=(withPatient?['patient_id','patient']:[]).concat(['test_id','date','entry_method','rows_done','rows_target','total_sec']);
   for(let i=0;i<maxRows;i++){ head.push('row'+(i+1)+'_sec'); }
   const rows=[head];
   for(const r of list){
-    const line=(withPatient?[r.patientId,r._pname]:[]).concat([r.id, fmtDate(r.createdAt), r.rowsDone, r.rowsTarget, fmtSec(r.totalMs)]);
+    const line=(withPatient?[r.patientId,r._pname]:[]).concat([r.id, fmtDate(r.createdAt), r.entryMethod||'timer', r.rowsDone, r.rowsTarget, fmtSec(r.totalMs)]);
     for(let i=0;i<maxRows;i++){ line.push(r.rowDurations[i]!==undefined?fmtSec(r.rowDurations[i]):''); }
     rows.push(line);
   }
